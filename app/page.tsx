@@ -526,17 +526,17 @@ export default function App() {
         {sidebarOpen ? (
           <div className="flex items-center w-full pr-2">
             <img
-              src="https://placehold.co/150x40/transparent/98935c?text=Trader+Lab&font=Inter"
-              alt="Trader Lab Full Logo"
-              className="h-8 w-auto object-contain"
+              src="/flowstate-logo.png"
+              alt="Flowstate"
+              className="h-8 w-auto object-contain object-left"
             />
           </div>
         ) : (
           <div className="w-full flex justify-center">
             <img
-              src="https://placehold.co/32x32/transparent/98935c?text=TL&font=Inter"
-              alt="Trader Lab Icon"
-              className="h-8 w-8 object-contain"
+              src="/flowstate-logo.png"
+              alt="Flowstate"
+              className="h-8 w-auto max-w-[2rem] object-contain"
             />
           </div>
         )}

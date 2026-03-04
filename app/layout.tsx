@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Trader Lab",
+  title: "Flowstate",
   description: "Trading performance dashboard and coach",
 };
 
