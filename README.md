@@ -2,6 +2,19 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Flow Lab (AI coach)
+
+The Flow Lab coach uses the Gemini API. To enable it:
+
+1. Get an API key at [Google AI Studio](https://aistudio.google.com/apikey) and ensure the Gemini API is enabled.
+2. Copy `.env.example` to `.env.local`:  
+   `cp .env.example .env.local`
+3. Edit `.env.local` and set `GEMINI_API_KEY` to your key (or use `NEXT_PUBLIC_GEMINI_API_KEY` if you prefer).
+
+Restart the dev server after adding or changing env vars.
+
+### Run the app
+
 First, run the development server:
 
 ```bash

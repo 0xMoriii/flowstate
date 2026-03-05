@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, memo } from "react";
+import Image from "next/image";
 import {
   LineChart,
   Line,
@@ -10,6 +11,38 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
+import {
+  List as LucideList,
+  Calendar as LucideCalendar,
+  Target as LucideTarget,
+  Brain as LucideBrain,
+  Layout as LucideLayoutDashboard,
+  Zap as LucideZap,
+  TrendingUp as LucideTrendingUp,
+  BarChart3 as LucideBarChart3,
+  Activity as LucideActivity,
+  Crosshair as LucideCrosshair,
+  CircleDot as LucideCircleDot,
+  LineChart as LucideLineChart,
+  Pencil as LucidePencil,
+  Trash2 as LucideTrash2,
+  type LucideIcon,
+} from "lucide-react";
+
+/** Model card icon options (id -> Lucide component). Used in Models tab and trade model tag. */
+const MODEL_ICONS: Record<string, LucideIcon> = {
+  target: LucideTarget,
+  brain: LucideBrain,
+  zap: LucideZap,
+  trendingUp: LucideTrendingUp,
+  barChart: LucideBarChart3,
+  activity: LucideActivity,
+  crosshair: LucideCrosshair,
+  circleDot: LucideCircleDot,
+  lineChart: LucideLineChart,
+};
+// To swap a sidebar icon: 1) Pick one at https://lucide.dev/icons 2) Add it here, e.g. "Sparkles as LucideDiscipline"
+// 3) Use it in the nav array below, e.g. { id: "discipline", icon: LucideDiscipline, label: "Discipline" }
 
 // --- CONFIG & ICONS ---
 const COLORS = {
@@ -83,7 +116,28 @@ const Icons = {
       <polyline points="9 18 15 12 9 6"></polyline>
     </svg>
   ),
+  Tag: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+      <line x1="7" y1="7" x2="7.01" y2="7"></line>
+    </svg>
+  ),
 };
+
+/** Normalize futures symbol for display: ESM4, MESH6, ESH6 -> ES; NQM4, MNQH6, NQH6 -> NQ; etc. */
+function formatSymbolDisplay(symbol: string): string {
+  const s = (symbol || "").trim();
+  if (/^M?ES/i.test(s)) return "ES";
+  if (/^M?NQ/i.test(s)) return "NQ";
+  const root = s.replace(/[FGHJKMNQUVXZ]\d?$/i, "").slice(0, 3).toUpperCase();
+  return root || s;
+}
+
+/** Format PnL consistently: "+$100.00" or "-$100.00" (sign first, then $, then amount). */
+function formatPnl(value: number, decimals: number = 2): string {
+  const sign = value >= 0 ? "+" : "-";
+  return `${sign}$${Math.abs(value).toFixed(decimals)}`;
+}
 
 const MARK_DOUGLAS_QUOTES = [
   "An edge is nothing more than an indication of a higher probability of one thing happening over another.",
@@ -102,12 +156,16 @@ const generateMockTrades = () => {
     pnl: number;
     capitalAfter: number;
     tags: string[];
+    modelTag?: string | null; // model name when trade was executed with a saved model (separate from tags)
     notes: string;
     strength: number;
     modelAdherence: number;
     entryPrice?: number;
     exitPrice?: number;
     isLong?: boolean;
+    lotSize?: number; // number of contracts (from imports or manual)
+    chartImage?: string; // legacy single image (migrated to chartImages)
+    chartImages?: string[]; // base64 data URLs for attached chart/screenshots
   }> = [];
   let currentCapital = 50000;
   const now = new Date();
@@ -133,17 +191,66 @@ const generateMockTrades = () => {
         pnl,
         capitalAfter: currentCapital,
         tags: isWin ? ["Trend Following"] : ["FOMO", "Early Entry"],
+        modelTag: undefined,
         notes: "",
         strength: 0,
         modelAdherence: Math.random() > 0.3 ? 1 : 0,
         entryPrice,
         exitPrice,
         isLong: pnl > 0,
+        lotSize: Math.random() > 0.3 ? 1 : 2,
       });
     }
   }
   return trades.reverse();
 };
+
+// --- LOCAL STORAGE PERSISTENCE (Option 1: client-only) ---
+const TRADES_STORAGE_KEY = "flowstate-trades";
+
+function loadTradesFromStorage(): ReturnType<typeof generateMockTrades> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(TRADES_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTradesToStorage(trades: ReturnType<typeof generateMockTrades>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(TRADES_STORAGE_KEY, JSON.stringify(trades));
+  } catch {
+    // Quota exceeded or other; fail silently
+  }
+}
+
+const DISCIPLINE_NOTES_STORAGE_KEY = "flowstate-discipline-notes";
+
+function loadDisciplineNotesFromStorage(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(DISCIPLINE_NOTES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDisciplineNotesToStorage(notes: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DISCIPLINE_NOTES_STORAGE_KEY, JSON.stringify(notes));
+  } catch {
+    // Quota exceeded or other; fail silently
+  }
+}
 
 // --- GEMINI API INTEGRATIONS (via Next.js API routes to avoid CORS) ---
 const generateAIResponse = async (prompt: string, systemInstruction: string) => {
@@ -173,49 +280,6 @@ const generateAIResponse = async (prompt: string, systemInstruction: string) => 
     }
   }
   return "AI System unavailable.";
-};
-
-const playPCM16Audio = (base64Data: string, sampleRate: number) => {
-  if (typeof window === "undefined") return;
-  const binaryString = window.atob(base64Data);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  const pcm16Data = new Int16Array(bytes.buffer);
-
-  const AudioCtxConstructor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof window.AudioContext }).webkitAudioContext;
-  if (!AudioCtxConstructor) return;
-  const audioCtx = new AudioCtxConstructor();
-  const audioBuffer = audioCtx.createBuffer(1, pcm16Data.length, sampleRate);
-  const channelData = audioBuffer.getChannelData(0);
-
-  for (let i = 0; i < pcm16Data.length; i++) {
-    channelData[i] = pcm16Data[i] / 32768.0;
-  }
-
-  const source = audioCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(audioCtx.destination);
-  source.start();
-};
-
-const generateAIAudio = async (text: string) => {
-  const response = await fetch("/api/gemini/tts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, voiceName: "Charon" }),
-  });
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data?.error ?? `HTTP ${response.status}`);
-  }
-  const { data: base64Data, sampleRate } = await response.json();
-  if (base64Data && sampleRate) {
-    playPCM16Audio(base64Data, sampleRate);
-  }
 };
 
 // --- COMPONENTS ---
@@ -261,31 +325,481 @@ const StrengthMeter = ({ value, onChange }: { value: number; onChange: (v: numbe
   );
 };
 
+// --- CALENDAR (standalone so it doesn't remount on App re-renders) ---
+const CALENDAR_DAY_MIN_WIDTH = 104;
+const CALENDAR_GRID_GAP_PX = 8;
+const CALENDAR_FULL_MIN_WIDTH = CALENDAR_DAY_MIN_WIDTH * 8 + CALENDAR_GRID_GAP_PX * 7;
+
+type CalendarTrade = ReturnType<typeof generateMockTrades>[number];
+
+function CalendarView({
+  trades,
+  setSelectedTrade,
+  viewMonth,
+  setViewMonth,
+  viewYear,
+  selectedDate,
+  setSelectedDate,
+}: {
+  trades: ReturnType<typeof generateMockTrades>;
+  setSelectedTrade: (t: CalendarTrade | null) => void;
+  viewMonth: number;
+  setViewMonth: React.Dispatch<React.SetStateAction<number>>;
+  viewYear: number;
+  selectedDate: string | null;
+  setSelectedDate: React.Dispatch<React.SetStateAction<string | null>>;
+}) {
+  const [compactCalendar, setCompactCalendar] = useState(false);
+  const calendarContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = calendarContainerRef.current;
+    if (!el) return;
+    const updateCompact = () => {
+      const w = el.clientWidth;
+      setCompactCalendar(w < CALENDAR_FULL_MIN_WIDTH);
+    };
+    updateCompact();
+    const ro = new ResizeObserver(updateCompact);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const getDaysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = getDaysInMonth(viewMonth, viewYear);
+
+  let totalMonthlyPnL = 0;
+  const weeks: { days: (null | { date: number; fullDate: string; trades: CalendarTrade[]; pnl: number })[]; weeklyPnL: number }[] = [];
+  let currentWeek: { days: (null | { date: number; fullDate: string; trades: CalendarTrade[]; pnl: number })[]; weeklyPnL: number } = {
+    days: Array(firstDayOfMonth).fill(null),
+    weeklyPnL: 0,
+  };
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = new Date(viewYear, viewMonth, d).toDateString();
+    const dayTrades = trades.filter((t) => new Date(t.entryTime).toDateString() === dateStr);
+    const dayPnL = dayTrades.reduce((sum, t) => sum + t.pnl, 0);
+
+    totalMonthlyPnL += dayPnL;
+    currentWeek.weeklyPnL += dayPnL;
+    currentWeek.days.push({ date: d, fullDate: dateStr, trades: dayTrades, pnl: dayPnL });
+
+    if (currentWeek.days.length === 7) {
+      weeks.push(currentWeek);
+      currentWeek = { days: [], weeklyPnL: 0 };
+    }
+  }
+  if (currentWeek.days.length > 0) {
+    while (currentWeek.days.length < 7) currentWeek.days.push(null);
+    weeks.push(currentWeek);
+  }
+
+  const tradesForSelectedDate = selectedDate
+    ? trades.filter((t) => new Date(t.entryTime).toDateString() === selectedDate)
+    : [];
+
+  return (
+    <div className="fade-in space-y-6">
+      <div
+        className={`flex mb-6 ${compactCalendar ? "flex-col gap-4 items-start" : "justify-between items-end"}`}
+      >
+        <div>
+          <h2
+            className={`display-font text-[#2e2e2e] ${compactCalendar ? "text-3xl" : "text-5xl"}`}
+          >
+            {new Date(viewYear, viewMonth).toLocaleString("default", {
+              month: "long",
+              year: "numeric",
+            })}
+          </h2>
+          <div className="text-sm font-medium text-gray-500 mt-2 flex gap-4">
+            <button
+              onClick={() => setViewMonth((prev) => (prev === 0 ? 11 : prev - 1))}
+              className="hover:text-black"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={() => setViewMonth((prev) => (prev === 11 ? 0 : prev + 1))}
+              className="hover:text-black"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+        <div className={compactCalendar ? "" : "text-right"}>
+          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-2">
+            Monthly PnL
+          </div>
+          <div
+            className={`display-font tracking-tight ${compactCalendar ? "text-3xl" : "text-5xl"}`}
+            style={{ color: totalMonthlyPnL >= 0 ? COLORS.profit : COLORS.loss }}
+          >
+            {formatPnl(totalMonthlyPnL, 2)}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-8">
+        <div ref={calendarContainerRef} className="w-full overflow-x-auto" style={{ minWidth: 0 }}>
+          <div className="flex flex-col min-w-[600px] pl-8 pr-8 pb-8">
+            <div className={`grid grid-cols-8 mb-2 ${compactCalendar ? "gap-1" : "gap-2"}`}>
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Weekly"].map((d, i) => (
+                <div
+                  key={d}
+                  className={`text-center font-semibold text-gray-500 uppercase ${compactCalendar ? "text-[8px] tracking-wide" : "text-[10px] tracking-wider"} ${i === 7 ? "text-[#2e2e2e]" : ""}`}
+                >
+                  {compactCalendar && i === 7 ? "Wk" : d}
+                </div>
+              ))}
+            </div>
+
+            {weeks.map((week, wIdx) => (
+              <div
+                key={wIdx}
+                className={`grid grid-cols-8 mb-2 ${compactCalendar ? "gap-1" : "gap-2"}`}
+              >
+                {week.days.map((day, dIdx) => (
+                  <GlassCard
+                    key={dIdx}
+                    onClick={day && day.trades.length > 0 ? () => setSelectedDate(day.fullDate) : undefined}
+                    className={`p-3 flex flex-col justify-start items-start gap-0 transition-all duration-200
+                      ${compactCalendar ? "h-10 min-h-10" : "h-[100px] min-h-[100px] justify-between"}
+                      ${!day ? "invisible" : ""} 
+                      ${day && day.trades.length === 0 ? "cursor-default" : "cursor-pointer"}
+                      ${day?.fullDate === selectedDate
+                        ? (day?.pnl ?? 0) > 0
+                          ? "!bg-[#42bda8] !border-2 !border-[#42bda8]"
+                          : (day?.pnl ?? 0) < 0
+                            ? "!bg-[#f43636] !border-2 !border-[#f43636]"
+                            : "!bg-[#98935c] !border-2 !border-[#98935c]"
+                        : day && day.trades.length > 0
+                          ? (day.pnl ?? 0) > 0
+                            ? compactCalendar
+                              ? "!border-2 !border-[#42bda8] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(66,189,168,0.35)]"
+                              : "!border-2 !border-[#42bda8] hover:!border-[#42bda8] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(66,189,168,0.35)]"
+                            : (day.pnl ?? 0) < 0
+                              ? compactCalendar
+                                ? "!border-2 !border-[#f43636] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(244,54,54,0.35)]"
+                                : "!border-2 !border-[#f43636] hover:!border-[#f43636] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(244,54,54,0.35)]"
+                              : compactCalendar
+                                ? "!border-2 !border-[#98935c] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(152,147,92,0.3)]"
+                                : "!border-2 !border-[#98935c] hover:!border-[#98935c] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(152,147,92,0.3)]"
+                          : "border-2 border-transparent"}
+                    `}
+                  >
+                    {day && (
+                      <>
+                        <div
+                          className={`font-extrabold w-full text-right ${compactCalendar ? "text-xs" : "text-xl"} ${day.fullDate === selectedDate ? "text-white" : "text-[var(--color-gray-500)]"}`}
+                        >
+                          {day.date}
+                        </div>
+                        {!compactCalendar && (
+                          <div className="text-right space-y-0.5 w-full">
+                            {day.trades.length > 0 && (
+                              <div
+                                className={`text-[10px] font-medium uppercase tracking-wide ${day.fullDate === selectedDate ? "text-white/90" : "text-gray-500"}`}
+                              >
+                                {day.trades.length} {day.trades.length === 1 ? "trade" : "trades"}
+                              </div>
+                            )}
+                            {day.trades.length > 0 && (
+                              <div
+                                className={`text-sm font-semibold ${day.fullDate === selectedDate ? "text-white" : ""}`}
+                                style={day.fullDate !== selectedDate ? { color: day.pnl >= 0 ? COLORS.profit : COLORS.loss } : undefined}
+                              >
+                                {formatPnl(day.pnl, 0)}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </GlassCard>
+                ))}
+                <div
+                  className={`flex items-center justify-center rounded-xl bg-white/20 font-semibold ${compactCalendar ? "text-xs" : "text-sm"}`}
+                  style={{ color: week.weeklyPnL >= 0 ? COLORS.profit : COLORS.loss }}
+                >
+                  {formatPnl(week.weeklyPnL, 0)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {selectedDate && (
+          <div className="w-full fade-in pb-8">
+            <GlassCard>
+              <div className="flex justify-between items-end mb-6 border-b border-white/50 pb-4">
+                <h3 className="display-font text-3xl text-[#2e2e2e]">
+                  {new Date(selectedDate).toLocaleDateString(undefined, {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </h3>
+                <span className="text-sm font-medium text-gray-500">
+                  {tradesForSelectedDate.length} Trades
+                </span>
+              </div>
+              {tradesForSelectedDate.length === 0 ? (
+                <p className="text-sm font-light text-gray-500">No trades recorded.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {tradesForSelectedDate.map((t) => (
+                    <div
+                      key={t.id}
+                      onClick={() => setSelectedTrade(t)}
+                      className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 transition-colors ${t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(t.instrument)}</span>
+                        <span
+                          className="font-medium"
+                          style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+                        >
+                          {formatPnl(t.pnl, 2)}
+                        </span>
+                      </div>
+                      <div className="text-xs font-medium text-gray-500">
+                        {new Date(t.entryTime).toLocaleTimeString()} -{" "}
+                        {new Date(t.exitTime).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </GlassCard>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // --- MAIN APP ---
 export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [trades, setTrades] = useState<ReturnType<typeof generateMockTrades>>([]);
+  const [trades, setTrades] = useState<ReturnType<typeof generateMockTrades>>(() => {
+    const stored = loadTradesFromStorage();
+    return stored && stored.length > 0 ? stored : generateMockTrades();
+  });
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
   const [importStatus, setImportStatus] = useState("");
   const [quote] = useState(
     () => MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]
   );
 
-  const [dashboardInsight, setDashboardInsight] = useState("");
-  const [isAnalyzingDashboard, setIsAnalyzingDashboard] = useState(false);
   const [chartTimeframe, setChartTimeframe] = useState("ALL");
-  const [scoreModalOpen, setScoreModalOpen] = useState(false);
-  const [isReadingAssessment, setIsReadingAssessment] = useState(false);
 
-  const [isGeneratingStrat, setIsGeneratingStrat] = useState(false);
-  const [stratName, setStratName] = useState("");
-  const [stratContext, setStratContext] = useState("");
-  const [stratTrigger, setStratTrigger] = useState("");
+  // --- MODEL FRAMEWORKS (Models tab) ---
+  type ModelSection = {
+    id: string;
+    label: string;
+    value: string;
+  };
+
+  type TradingModel = {
+    id: string;
+    name: string;
+    iconId: string;
+    sections: ModelSection[];
+    createdAt: number;
+  };
+
+  const MODEL_STORAGE_KEY = "flowstate-models";
+
+  function loadModelsFromStorage(): TradingModel[] {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(MODEL_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed;
+    } catch {
+      return [];
+    }
+  }
+
+  function saveModelsToStorage(models: TradingModel[]) {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(models));
+    } catch {
+      // ignore
+    }
+  }
+
+  const [models, setModels] = useState<TradingModel[]>(() => loadModelsFromStorage());
+  const [expandedModelId, setExpandedModelId] = useState<string | "new" | null>(null);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+
+  const [draftModelName, setDraftModelName] = useState("");
+  const [draftIconId, setDraftIconId] = useState("target");
+  const [draftContext, setDraftContext] = useState("");
+  const [draftEntry, setDraftEntry] = useState("");
+  const [draftRisk, setDraftRisk] = useState("");
+
+  const optionalSectionTemplates: { id: string; label: string; placeholder: string }[] = [
+    {
+      id: "marketConditions",
+      label: "Market Conditions",
+      placeholder: "9:30–11:00 AM EST, trending conditions",
+    },
+    {
+      id: "htfBias",
+      label: "Higher Timeframe Bias",
+      placeholder: "Either (with confirmation)",
+    },
+    {
+      id: "keyLevels",
+      label: "Key Levels",
+      placeholder:
+        "Order blocks from 15m/1H timeframes, previous day high/low, institutional levels, liquidity pools around key levels.",
+    },
+    {
+      id: "confirmationRequirements",
+      label: "Confirmation Requirements",
+      placeholder:
+        "1. HTF trend alignment\n2. Volume spike on entry candle\n3. Clean structure (no overlapping candles)\n4. Time of day within playbook window",
+    },
+    {
+      id: "profitTarget",
+      label: "Profit Target",
+      placeholder: "2:1 R/R minimum",
+    },
+    {
+      id: "trailingStop",
+      label: "Trailing Stop",
+      placeholder: "Move to BE at 1R, trail at swing highs/lows or structure pivots.",
+    },
+    {
+      id: "exitStrategy",
+      label: "Exit Strategy",
+      placeholder:
+        "Scale out 50% at 1.5R, let remainder run to next key level. Exit on clear reversal signal or before major news.",
+    },
+  ];
+
+  const [enabledOptionalSections, setEnabledOptionalSections] = useState<Record<string, boolean>>({});
+  const [optionalSectionValues, setOptionalSectionValues] = useState<Record<string, string>>({});
+
+  const [customSections, setCustomSections] = useState<Array<{ id: string; label: string; value: string }>>([]);
+
+  const [checklistState, setChecklistState] = useState<Record<string, boolean>>({});
+
+  const [disciplineNotes, setDisciplineNotes] = useState<Record<string, string>>(
+    () => loadDisciplineNotesFromStorage(),
+  );
+
+  // Persist trades to localStorage whenever they change
+  useEffect(() => {
+    saveTradesToStorage(trades);
+  }, [trades]);
 
   useEffect(() => {
-    setTrades(generateMockTrades());
-  }, []);
+    saveDisciplineNotesToStorage(disciplineNotes);
+  }, [disciplineNotes]);
+
+  useEffect(() => {
+    saveModelsToStorage(models);
+  }, [models]);
+
+  const resetDraftModel = () => {
+    setDraftModelName("");
+    setDraftIconId("target");
+    setDraftContext("");
+    setDraftEntry("");
+    setDraftRisk("");
+    setEnabledOptionalSections({});
+    setOptionalSectionValues({});
+    setCustomSections([]);
+    setEditingModelId(null);
+  };
+
+  const loadDraftFromModel = (model: TradingModel) => {
+    setDraftModelName(model.name);
+    setDraftIconId(model.iconId in MODEL_ICONS ? model.iconId : "target");
+    const contextSec = model.sections.find((s) => s.id === "context");
+    const entrySec = model.sections.find((s) => s.id === "entry");
+    const riskSec = model.sections.find((s) => s.id === "risk");
+    setDraftContext(contextSec?.value ?? "");
+    setDraftEntry(entrySec?.value ?? "");
+    setDraftRisk(riskSec?.value ?? "");
+    const enabled: Record<string, boolean> = {};
+    const values: Record<string, string> = {};
+    optionalSectionTemplates.forEach((tpl) => {
+      const sec = model.sections.find((s) => s.id === tpl.id);
+      if (sec) {
+        enabled[tpl.id] = true;
+        values[tpl.id] = sec.value ?? "";
+      }
+    });
+    setEnabledOptionalSections(enabled);
+    setOptionalSectionValues(values);
+    const custom = model.sections
+      .filter((s) => s.id === "custom")
+      .map((s, i) => ({ id: `c_${Date.now()}_${i}`, label: s.label, value: s.value }));
+    setCustomSections(custom);
+    setEditingModelId(model.id);
+  };
+
+  const handleSaveModel = () => {
+    const name = draftModelName.trim();
+    if (!name) return;
+
+    const baseSections: ModelSection[] = [
+      { id: "context", label: "Context & Setup", value: draftContext.trim() },
+      { id: "entry", label: "Entry", value: draftEntry.trim() },
+      { id: "risk", label: "Risk", value: draftRisk.trim() },
+    ];
+
+    const optionalSections: ModelSection[] = optionalSectionTemplates
+      .filter((tpl) => enabledOptionalSections[tpl.id])
+      .map((tpl) => ({
+        id: tpl.id,
+        label: tpl.label,
+        value: (optionalSectionValues[tpl.id] ?? "").trim(),
+      }));
+
+    const custom: ModelSection[] = customSections
+      .map((c) => ({
+        id: "custom",
+        label: c.label.trim() || "Custom Input",
+        value: c.value.trim(),
+      }))
+      .filter((c) => c.value);
+
+    const existing = editingModelId ? models.find((m) => m.id === editingModelId) : null;
+    const model: TradingModel = {
+      id: existing?.id ?? `mdl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      iconId: draftIconId,
+      sections: [...baseSections, ...optionalSections, ...custom],
+      createdAt: existing?.createdAt ?? Date.now(),
+    };
+
+    if (editingModelId) {
+      setModels((prev) => prev.map((m) => (m.id === editingModelId ? model : m)));
+    } else {
+      setModels((prev) => [model, ...prev]);
+    }
+    resetDraftModel();
+    setExpandedModelId(model.id);
+  };
+
+  const handleRemoveModel = (id: string) => {
+    if (typeof window === "undefined") return;
+    if (!window.confirm("Remove this model? Trades tagged with it will keep the model name but the model will no longer appear in the list.")) return;
+    setModels((prev) => prev.filter((m) => m.id !== id));
+    if (expandedModelId === id) setExpandedModelId(null);
+    setEditingModelId((prev) => (prev === id ? null : prev));
+  };
 
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -306,6 +820,7 @@ export default function App() {
         const soldIdx = headers.indexOf("soldtimestamp");
         const buyPriceIdx = headers.indexOf("buyprice");
         const sellPriceIdx = headers.indexOf("sellprice");
+        const qtyIdx = headers.findIndex((h) => /quantity|qty|contracts|size/.test(h.trim()));
 
         if (
           pnlIdx === -1 ||
@@ -329,6 +844,8 @@ export default function App() {
           pnl: number;
           capitalAfter?: number;
           tags: string[];
+          modelTag?: string | null;
+          lotSize?: number;
           notes: string;
           strength: number;
           modelAdherence: number;
@@ -357,6 +874,8 @@ export default function App() {
           const entryPrice = isLong ? buyPrice : sellPrice;
           const exitPrice = isLong ? sellPrice : buyPrice;
 
+          const rawQty = qtyIdx >= 0 ? parseInt(row[qtyIdx]?.replace(/"/g, ""), 10) : NaN;
+          const lotSize = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : undefined;
           parsedTrades.push({
             id: `csv_${Date.now()}_${i}`,
             instrument: row[instIdx].replace(/"/g, "") || "UNKNOWN",
@@ -367,6 +886,8 @@ export default function App() {
             isLong,
             pnl,
             tags: ["Tradovate Import"],
+            modelTag: undefined,
+            lotSize,
             notes: "",
             strength: 0,
             modelAdherence: 1,
@@ -381,7 +902,7 @@ export default function App() {
         });
 
         setTrades(withCapital.reverse() as ReturnType<typeof generateMockTrades>);
-        setImportStatus(`Successfully imported ${parsedTrades.length} Tradovate executions.`);
+        setImportStatus(`Successfully imported ${parsedTrades.length} trades.`);
         setTimeout(() => setImportStatus(""), 4000);
       } catch (err) {
         setImportStatus(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -400,8 +921,45 @@ export default function App() {
     const grossLoss = Math.abs(losses.reduce((sum, t) => sum + t.pnl, 0));
     const profitFactor = grossLoss === 0 ? grossProfit : grossProfit / grossLoss;
     const expectedReturn = (grossProfit - grossLoss) / trades.length;
-    const sharpeMock = (expectedReturn / (Math.random() * 50 + 10)).toFixed(2);
-    const disciplineScore = (trades.filter((t) => t.modelAdherence).length / trades.length) * 100;
+
+    // Win/Loss ratio as percentage: % of trades that were wins (e.g. 6 wins of 10 = 60%)
+    const winCount = wins.length;
+    const winLossRatio = trades.length ? (winCount / trades.length) * 100 : 0;
+
+    // Discipline: 3 factors (equal weight) → 0–100
+    // 1) Risk consistency: losses in a tight range (low variance) = higher score
+    const lossAmounts = losses.map((t) => Math.abs(t.pnl));
+    let riskConsistencyScore = 100;
+    if (lossAmounts.length >= 2) {
+      const mean = lossAmounts.reduce((a, b) => a + b, 0) / lossAmounts.length;
+      const variance = lossAmounts.reduce((s, x) => s + (x - mean) ** 2, 0) / lossAmounts.length;
+      const stdDev = Math.sqrt(variance);
+      const cv = mean > 0 ? stdDev / mean : 1; // coefficient of variation
+      riskConsistencyScore = Math.max(0, Math.min(100, 100 - 50 * cv));
+    }
+
+    // 2) Journaling: notes, tags, and chart images per trade (proper logging = higher score)
+    const journalingScores = trades.map((t) => {
+      const hasNotes = (t.notes?.trim() ?? "").length > 0;
+      const tagCount = t.tags?.length ?? 0;
+      const imageCount = (t as { chartImages?: string[] }).chartImages?.length ?? 0;
+      const notePart = hasNotes ? 40 : 0;
+      const tagPart = Math.min(tagCount * 12, 30);
+      const imagePart = Math.min(imageCount * 15, 30);
+      return Math.min(100, notePart + tagPart + imagePart);
+    });
+    const journalingScore = journalingScores.length
+      ? journalingScores.reduce((a, b) => a + b, 0) / journalingScores.length
+      : 0;
+
+    // 3) Strength meter: higher average strength (1–5) = better discipline
+    const strengths = trades.map((t) => t.strength ?? 0).filter((s) => s >= 0);
+    const avgStrength = strengths.length ? strengths.reduce((a, b) => a + b, 0) / strengths.length : 0;
+    const strengthScore = Math.min(100, (avgStrength / 5) * 100);
+
+    const disciplineScore = Math.round(
+      (riskConsistencyScore * 1) / 3 + (journalingScore * 1) / 3 + (strengthScore * 1) / 3,
+    );
 
     const pfComponent = Math.min(profitFactor, 3) / 3 * 40;
     const discComponent = disciplineScore * 0.4;
@@ -413,7 +971,7 @@ export default function App() {
 
     return {
       profitFactor,
-      sharpeMock,
+      winLossRatio,
       disciplineScore,
       score,
       totalTrades: trades.length,
@@ -470,86 +1028,59 @@ export default function App() {
     return { data, isPositive, currentNet: netProfit };
   }, [trades, chartTimeframe]);
 
-  const handleAnalyzeDashboard = async () => {
-    if (!metrics) return;
-    setIsAnalyzingDashboard(true);
-    const prompt = `Review my overall trading performance based on these metrics: Trader Score: ${metrics.score.toFixed(1)} out of 100, Profit Factor: ${metrics.profitFactor.toFixed(2)}, Discipline Index: ${metrics.disciplineScore.toFixed(0)}%, Sharpe (Est): ${metrics.sharpeMock}, Total Executions: ${metrics.totalTrades}. Give me a direct, 3-sentence macro assessment in the style of Mark Douglas. Point out what the numbers suggest about my psychology. No fluff.`;
-    const sysInst =
-      "You are a brutal, analytical trading coach. Synthesize Mark Douglas and Jim Simons. Speak directly to the trader.";
-    const response = await generateAIResponse(prompt, sysInst);
-    setDashboardInsight(response);
-    setIsAnalyzingDashboard(false);
-  };
-
-  const handleReadAssessment = async () => {
-    if (!dashboardInsight) return;
-    setIsReadingAssessment(true);
-    try {
-      await generateAIAudio(dashboardInsight);
-    } catch (err) {
-      console.error("Audio generation failed:", err);
-    }
-    setIsReadingAssessment(false);
-  };
-
-  const handleGenerateStrategy = async () => {
-    setIsGeneratingStrat(true);
-    const prompt = `Acting as a professional quantitative trading architect, flesh out a trading strategy.
-    If the user provided clues, build on them: Name: "${stratName}", Context: "${stratContext}", Trigger: "${stratTrigger}".
-    If they are completely blank, invent a highly robust, institutional-grade day-trading strategy from scratch.
-    
-    Format your response STRICTLY as exactly three lines separated by the pipe character '|' with NO prefixes, markdown, or extra text.
-    Example format:
-    London Breakout | Look for tight consolidation between 2AM and 4AM EST. Price must be above the 200 EMA on the 15m timeframe. | Enter on the first 5m candle close outside the pre-London range. Stop loss at the opposite end of the range.
-    `;
-    const sysInst = "You are a quantitative modeling architect. Output data strictly formatted as requested.";
-
-    const response = await generateAIResponse(prompt, sysInst);
-    const parts = response.split("|").map((p: string) => p.trim());
-
-    if (parts.length >= 3) {
-      setStratName(parts[0]);
-      setStratContext(parts[1]);
-      setStratTrigger(parts[2]);
-    } else {
-      setStratContext("AI Synthesis Error. Try generating again or provide more context cues.");
-    }
-
-    setIsGeneratingStrat(false);
-  };
-
   const renderSidebar = () => (
     <div
-      className={`${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 backdrop-blur-xl border-r border-white/50 flex flex-col p-4 shrink-0 z-20`}
+      className={`${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 backdrop-blur-xl border-r border-white/50 flex flex-col px-4 pb-4 pt-[49px] shrink-0 z-20`}
     >
-      <div className="flex items-center justify-between mb-8 mt-4">
-        {sidebarOpen ? (
-          <div className="flex items-center w-full pr-2">
-            <img
-              src="/flowstate-logo.png"
-              alt="Flowstate"
-              className="h-8 w-auto object-contain object-left"
-            />
-          </div>
-        ) : (
-          <div className="w-full flex justify-center">
-            <img
-              src="/flowstate-logo.png"
-              alt="Flowstate"
-              className="h-8 w-auto max-w-[2rem] object-contain"
-            />
-          </div>
-        )}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors hidden md:block shrink-0"
-          title="Toggle Sidebar"
-        >
-          {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
-        </button>
+      <div className="flex flex-col gap-4 mb-8 mt-4">
+        <div className="w-full relative h-10 min-h-[2.5rem] flex items-center">
+          {sidebarOpen ? (
+            <div className="relative w-full h-full">
+              <Image
+                src="/FLOWSTATE.svg"
+                alt="Flowstate"
+                fill
+                className="object-contain object-left"
+              />
+            </div>
+          ) : (
+            <div className="relative w-full h-full flex justify-center">
+              <Image
+                src="/FLOWSTATE%20Icon.svg"
+                alt="Flowstate"
+                fill
+                className="object-contain"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="mb-6 relative">
+      <nav className="flex flex-col space-y-3 flex-1 min-h-0">
+        {[
+          { id: "dashboard", icon: LucideLayoutDashboard, label: "Dashboard" },
+          { id: "recap", icon: LucideList, label: "Daily Recap" },
+          { id: "calendar", icon: LucideCalendar, label: "Calendar" },
+          { id: "discipline", icon: LucideBrain, label: "Discipline" },
+          { id: "strategy", icon: LucideTarget, label: "Models" },
+        ].map((item) => {
+          const IconComponent = item.icon;
+          return (
+          <button
+            key={item.id}
+            onClick={() => setActiveTab(item.id)}
+            className={`flex items-center p-3 rounded-xl transition-all ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/40"}`}
+          >
+            <span style={{ color: activeTab === item.id ? COLORS.accent : "#6b7280" }}>
+              <IconComponent size={20} strokeWidth={2} />
+            </span>
+            {sidebarOpen && <span className="ml-4 font-medium whitespace-nowrap">{item.label}</span>}
+          </button>
+          );
+        })}
+      </nav>
+
+      <div className="mt-auto pt-4 relative">
         <input
           type="file"
           accept=".csv"
@@ -559,38 +1090,18 @@ export default function App() {
         />
         <label
           htmlFor="csv-upload-sidebar"
-          className={`flex items-center ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium shadow-md hover:shadow-lg`}
+          className={`flex items-center ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium shadow-md hover:shadow-lg w-full`}
         >
           <Icons.Upload /> {sidebarOpen && <span className="ml-3 whitespace-nowrap">Import CSV</span>}
         </label>
         {importStatus && (
           <div
-            className={`absolute top-14 ${sidebarOpen ? "left-0 w-full" : "left-14 w-48"} z-50 bg-white/90 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center`}
+            className={`absolute bottom-full left-0 w-full mb-2 z-50 bg-white/90 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center`}
           >
             {importStatus}
           </div>
         )}
       </div>
-
-      <nav className="flex flex-col space-y-3">
-        {[
-          { id: "dashboard", icon: Icons.Home, label: "Dashboard" },
-          { id: "recap", icon: Icons.List, label: "Daily Recap" },
-          { id: "calendar", icon: Icons.Calendar, label: "Calendar" },
-          { id: "strategy", icon: Icons.Target, label: "Models" },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id)}
-            className={`flex items-center p-3 rounded-xl transition-all ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/40"}`}
-          >
-            <span style={{ color: activeTab === item.id ? COLORS.accent : "#6b7280" }}>
-              <item.icon />
-            </span>
-            {sidebarOpen && <span className="ml-4 font-medium whitespace-nowrap">{item.label}</span>}
-          </button>
-        ))}
-      </nav>
     </div>
   );
 
@@ -702,10 +1213,11 @@ export default function App() {
               Measurement
             </h4>
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-[#2e2e2e]">% of Executions on Model</p>
+              <p className="text-xs font-semibold text-[#2e2e2e]">Three equal factors (⅓ each)</p>
               <p className="text-[11px] font-light text-gray-500 leading-relaxed">
-                Tracks adherence to your predefined Model Architectures. Untagged, rogue, or impulsive
-                trades drop this score.
+                <strong>Risk consistency:</strong> Losses in a tight range (low variance) score higher. &nbsp;
+                <strong>Journaling:</strong> Notes, tags, and chart images per trade add to the score. &nbsp;
+                <strong>Strength:</strong> Higher trade strength ratings (1–5) across trades improve discipline.
               </p>
             </div>
           </div>
@@ -713,20 +1225,20 @@ export default function App() {
 
         <div className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40">
           <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
-            Sharpe (Est.)
+            Win / Loss Ratio
           </div>
           <div className="display-font text-7xl text-[#2e2e2e] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
-            {metrics?.sharpeMock}
+            {metrics ? `${(metrics.winLossRatio as number).toFixed(0)}%` : "--"}
           </div>
           <div className="absolute top-[105%] right-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
             <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-3 border-b border-gray-200 pb-2">
-              Estimation Notice
+              Measurement
             </h4>
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-[#2e2e2e]">Expected Return ÷ Variance</p>
+              <p className="text-xs font-semibold text-[#2e2e2e]">% of Trades That Were Wins</p>
               <p className="text-[11px] font-light text-gray-500 leading-relaxed">
-                Calculated on an intraday sample set without a standard risk-free rate. Treat as a
-                directional indicator, not a strict institutional Sharpe.
+                Win count ÷ total trades, as a percentage. Example: 6 wins and 4 losses out of 10
+                trades = 60% win/loss ratio.
               </p>
             </div>
           </div>
@@ -739,18 +1251,18 @@ export default function App() {
           className="flex flex-col p-6 bg-white/30 rounded-[2rem] cursor-pointer hover:bg-white/50 transition-colors border border-transparent hover:border-[#42bda8]/30"
         >
           <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
-            Best Execution
+            Best Trade
           </div>
           {metrics?.bestTrade ? (
             <div className="flex justify-between items-end">
               <div>
-                <div className="text-lg font-semibold text-[#2e2e2e]">{metrics.bestTrade.instrument}</div>
+                <div className="text-lg font-semibold text-[#2e2e2e]">{formatSymbolDisplay(metrics.bestTrade.instrument)}</div>
                 <div className="text-xs font-medium text-gray-500 mt-1">
                   {new Date(metrics.bestTrade.entryTime).toLocaleDateString()}
                 </div>
               </div>
               <div className="display-font text-5xl tracking-tight" style={{ color: COLORS.profit }}>
-                +${metrics.bestTrade.pnl.toFixed(2)}
+                {formatPnl(metrics.bestTrade.pnl, 2)}
               </div>
             </div>
           ) : (
@@ -763,58 +1275,26 @@ export default function App() {
           className="flex flex-col p-6 bg-white/30 rounded-[2rem] cursor-pointer hover:bg-white/50 transition-colors border border-transparent hover:border-[#f43636]/30"
         >
           <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
-            Worst Execution
+            Worst Trade
           </div>
           {metrics?.worstTrade ? (
             <div className="flex justify-between items-end">
               <div>
                 <div className="text-lg font-semibold text-[#2e2e2e]">
-                  {metrics.worstTrade.instrument}
+                  {formatSymbolDisplay(metrics.worstTrade.instrument)}
                 </div>
                 <div className="text-xs font-medium text-gray-500 mt-1">
                   {new Date(metrics.worstTrade.entryTime).toLocaleDateString()}
                 </div>
               </div>
               <div className="display-font text-5xl tracking-tight" style={{ color: COLORS.loss }}>
-                ${metrics.worstTrade.pnl.toFixed(2)}
+                {formatPnl(metrics.worstTrade.pnl, 2)}
               </div>
             </div>
           ) : (
             <div className="text-sm font-light text-gray-500">No data</div>
           )}
         </div>
-      </div>
-
-      <div className="flex flex-col p-8 bg-[#98935c]/10 rounded-[2rem] border border-[#98935c]/30 relative overflow-hidden transition-all">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="display-font text-4xl text-[#2e2e2e] flex items-center gap-3">
-            <Icons.Brain /> Coach&apos;s Assessment
-          </h3>
-          <div className="flex items-center gap-3">
-            {dashboardInsight && (
-              <button
-                onClick={handleReadAssessment}
-                disabled={isReadingAssessment}
-                className="flex items-center gap-2 px-4 py-2 bg-[#2e2e2e] hover:bg-black text-white border border-transparent rounded-xl transition-all text-sm font-semibold shadow-sm"
-              >
-                {isReadingAssessment ? "🔊 Synthesizing Audio..." : "🔊 Read Aloud"}
-              </button>
-            )}
-            <button
-              onClick={handleAnalyzeDashboard}
-              disabled={isAnalyzingDashboard}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white/60 hover:bg-white/90 border border-white/60 rounded-xl transition-all text-sm font-semibold text-[#2e2e2e] shadow-sm"
-            >
-              {isAnalyzingDashboard ? "Synthesizing Data..." : "✨ Request Assessment"}
-            </button>
-          </div>
-        </div>
-        <p
-          className={`text-[#2e2e2e] text-base leading-loose ${dashboardInsight ? "font-light" : "italic text-gray-500 font-light"}`}
-        >
-          {dashboardInsight ||
-            "Click 'Request Assessment' to have the AI analyze your current performance matrix and identify macro patterns in your execution."}
-        </p>
       </div>
 
       <div className="h-[450px] w-full p-8 bg-white/30 rounded-[2rem] relative flex flex-col">
@@ -825,7 +1305,7 @@ export default function App() {
               className="display-font text-5xl mt-1 tracking-tight"
               style={{ color: filteredChartData.isPositive ? COLORS.profit : COLORS.loss }}
             >
-              {filteredChartData.isPositive ? "+" : ""}${filteredChartData.currentNet.toFixed(2)}
+              {formatPnl(filteredChartData.currentNet, 2)}
             </div>
           </div>
           <div className="flex gap-1 bg-white/50 p-1 rounded-xl border border-white/60">
@@ -914,16 +1394,16 @@ export default function App() {
             todaysTrades.map((trade) => (
               <GlassCard
                 key={trade.id}
-                className="cursor-pointer hover:shadow-lg transition-shadow"
+                className={`cursor-pointer border border-transparent hover:bg-white/50 transition-colors ${trade.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
                 onClick={() => setSelectedTrade(trade)}
               >
                 <div className="flex justify-between items-center mb-4">
-                  <span className="font-semibold text-lg text-[#2e2e2e]">{trade.instrument}</span>
+                  <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(trade.instrument)}</span>
                   <span
                     className="font-medium"
                     style={{ color: trade.pnl >= 0 ? COLORS.profit : COLORS.loss }}
                   >
-                    {trade.pnl >= 0 ? "+" : ""}${trade.pnl.toFixed(2)}
+                    {formatPnl(trade.pnl, 2)}
                   </span>
                 </div>
                 <div className="text-sm font-medium text-gray-500 mb-4">
@@ -942,7 +1422,7 @@ export default function App() {
                 </div>
                 <div className="mt-4 pt-4 border-t border-white/50 flex items-center gap-4">
                   <span className="text-xs font-medium uppercase tracking-widest text-gray-500">
-                    Execution Strength:
+                    Trade Strength:
                   </span>
                   <StrengthMeter
                     value={trade.strength}
@@ -957,7 +1437,6 @@ export default function App() {
         </div>
         <div className="lg:col-span-1">
           <AICoachPanel
-            activeTrades={todaysTrades}
             metrics={metrics}
             onPushNote={(note, tradeId) => {
               if (!tradeId && todaysTrades.length > 0) tradeId = todaysTrades[0].id;
@@ -974,238 +1453,613 @@ export default function App() {
     );
   };
 
-  const CalendarView = () => {
-    const [selectedDate, setSelectedDate] = useState<string | null>(null);
-    const now = new Date();
-    const [viewMonth, setViewMonth] = useState(now.getMonth());
-    const [viewYear, setViewYear] = useState(now.getFullYear());
+  // Calendar state in App so it persists when modal opens/closes; passed to standalone CalendarView
+  const now = new Date();
+  const [calendarViewMonth, setCalendarViewMonth] = useState(now.getMonth());
+  const [calendarViewYear, setCalendarViewYear] = useState(now.getFullYear());
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null);
 
-    const getDaysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
-    const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
-    const daysInMonth = getDaysInMonth(viewMonth, viewYear);
+  const DisciplineView = () => {
+    const [selectedTag, setSelectedTag] = useState<string | null>(null);
+    const [selectedModelTag, setSelectedModelTag] = useState<string | null>(null);
 
-    let totalMonthlyPnL = 0;
-    const weeks: { days: (null | { date: number; fullDate: string; trades: typeof trades; pnl: number })[]; weeklyPnL: number }[] = [];
-    let currentWeek: { days: (null | { date: number; fullDate: string; trades: typeof trades; pnl: number })[]; weeklyPnL: number } = {
-      days: Array(firstDayOfMonth).fill(null),
-      weeklyPnL: 0,
-    };
+    const tagCounts = useMemo(() => {
+      const counts: Record<string, number> = {};
+      trades.forEach((t) => {
+        t.tags.forEach((tag) => {
+          counts[tag] = (counts[tag] ?? 0) + 1;
+        });
+      });
+      return counts;
+    }, [trades]);
 
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = new Date(viewYear, viewMonth, d).toDateString();
-      const dayTrades = trades.filter((t) => new Date(t.entryTime).toDateString() === dateStr);
-      const dayPnL = dayTrades.reduce((sum, t) => sum + t.pnl, 0);
+    const modelTagCounts = useMemo(() => {
+      const counts: Record<string, number> = {};
+      trades.forEach((t) => {
+        const m = (t as { modelTag?: string | null }).modelTag;
+        if (m && m.trim()) counts[m] = (counts[m] ?? 0) + 1;
+      });
+      return counts;
+    }, [trades]);
 
-      totalMonthlyPnL += dayPnL;
-      currentWeek.weeklyPnL += dayPnL;
-      currentWeek.days.push({ date: d, fullDate: dateStr, trades: dayTrades, pnl: dayPnL });
+    const sortedTags = useMemo(
+      () => Object.entries(tagCounts).sort((a, b) => b[1] - a[1]),
+      [tagCounts]
+    );
+    const sortedModelTags = useMemo(
+      () => Object.entries(modelTagCounts).sort((a, b) => b[1] - a[1]),
+      [modelTagCounts]
+    );
 
-      if (currentWeek.days.length === 7) {
-        weeks.push(currentWeek);
-        currentWeek = { days: [], weeklyPnL: 0 };
-      }
-    }
-    if (currentWeek.days.length > 0) {
-      while (currentWeek.days.length < 7) currentWeek.days.push(null);
-      weeks.push(currentWeek);
-    }
+    const filteredTrades = useMemo(() => {
+      let list = trades;
+      if (selectedTag) list = list.filter((t) => t.tags.includes(selectedTag));
+      if (selectedModelTag) list = list.filter((t) => (t as { modelTag?: string | null }).modelTag === selectedModelTag);
+      return list;
+    }, [trades, selectedTag, selectedModelTag]);
 
-    const tradesForSelectedDate = selectedDate
-      ? trades.filter((t) => new Date(t.entryTime).toDateString() === selectedDate)
-      : [];
+    const notesKey = selectedModelTag ? `model:${selectedModelTag}` : selectedTag;
+    const maxCount = sortedTags.length ? Math.max(...sortedTags.map(([, c]) => c)) : 1;
+    const maxModelCount = sortedModelTags.length ? Math.max(...sortedModelTags.map(([, c]) => c)) : 1;
 
     return (
       <div className="fade-in space-y-6">
-        <div className="flex justify-between items-end mb-6">
-          <div>
-            <h2 className="display-font text-5xl text-[#2e2e2e]">
-              {new Date(viewYear, viewMonth).toLocaleString("default", {
-                month: "long",
-                year: "numeric",
-              })}
-            </h2>
-            <div className="text-sm font-medium text-gray-500 mt-2 flex gap-4">
-              <button
-                onClick={() => setViewMonth((prev) => (prev === 0 ? 11 : prev - 1))}
-                className="hover:text-black"
-              >
-                ← Prev
-              </button>
-              <button
-                onClick={() => setViewMonth((prev) => (prev === 11 ? 0 : prev + 1))}
-                className="hover:text-black"
-              >
-                Next →
-              </button>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-2">
-              Net Monthly
-            </div>
-            <div
-              className="display-font text-5xl tracking-tight"
-              style={{ color: totalMonthlyPnL >= 0 ? COLORS.profit : COLORS.loss }}
-            >
-              {totalMonthlyPnL >= 0 ? "+" : ""}${totalMonthlyPnL.toFixed(2)}
-            </div>
+        <h2 className="display-font text-5xl text-[#2e2e2e]">Discipline</h2>
+        <p className="text-sm font-light text-gray-500 max-w-xl">
+          Filter by tag or model to review trades and work through discipline problems. Use Flow Lab to discuss the filtered set and attach notes.
+        </p>
+
+        {/* Tags (per-trade tags) */}
+        <div className="space-y-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">Tags</span>
+          <div className="flex flex-wrap gap-3 items-center">
+            {sortedTags.length === 0 ? (
+              <span className="text-sm font-light text-gray-500">No tags yet. Add tags to trades in trade details.</span>
+            ) : (
+              sortedTags.map(([tag, count]) => {
+                const isSelected = selectedTag === tag;
+                const isHighCount = maxCount > 0 && count >= maxCount * 0.8;
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTag(isSelected ? null : tag);
+                      setSelectedModelTag(null);
+                    }}
+                    className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
+                      isSelected
+                        ? "bg-[#2e2e2e] text-white border-[#2e2e2e] font-semibold"
+                        : "bg-white/40 border-white/60 text-[#2e2e2e] hover:bg-white/60 hover:border-[#98935c]/50 " +
+                          (isHighCount ? "font-semibold" : "font-medium")
+                    }`}
+                  >
+                    {tag}
+                    <span className="ml-1.5 text-gray-500 font-normal">({count})</span>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
 
-        <div className="flex flex-col gap-8">
-          <div className="w-full">
-            <div className="grid grid-cols-8 gap-2 mb-2">
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "W-Net"].map((d, i) => (
-                <div
-                  key={d}
-                  className={`text-center text-[10px] font-semibold text-gray-500 uppercase tracking-wider ${i === 7 ? "text-[#2e2e2e]" : ""}`}
-                >
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {weeks.map((week, wIdx) => (
-              <div key={wIdx} className="grid grid-cols-8 gap-2 mb-2">
-                {week.days.map((day, dIdx) => (
-                  <GlassCard
-                    key={dIdx}
-                    onClick={() => day && setSelectedDate(day.fullDate)}
-                    className={`min-h-[80px] p-2 flex flex-col justify-between cursor-pointer hover:bg-white/60 transition-colors
-                      ${!day ? "invisible" : ""} 
-                      ${day?.fullDate === selectedDate ? "ring-2 ring-[#98935c]" : ""}
-                      ${(day?.pnl ?? 0) > 0 ? "border-b-4 border-b-[#42bda8]" : (day?.pnl ?? 0) < 0 ? "border-b-4 border-b-[#f43636]" : ""}
-                    `}
+        {/* Models (model tag from Models page) */}
+        <div className="space-y-2">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">Models</span>
+          <div className="flex flex-wrap gap-3 items-center">
+            {sortedModelTags.length === 0 ? (
+              <span className="text-sm font-light text-gray-500">No model tags yet. Assign a model in trade details.</span>
+            ) : (
+              sortedModelTags.map(([modelName, count]) => {
+                const isSelected = selectedModelTag === modelName;
+                const isHighCount = maxModelCount > 0 && count >= maxModelCount * 0.8;
+                return (
+                  <button
+                    key={modelName}
+                    type="button"
+                    onClick={() => {
+                      setSelectedModelTag(isSelected ? null : modelName);
+                      setSelectedTag(null);
+                    }}
+                    className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
+                      isSelected
+                        ? "bg-[#98935c] text-white border-[#98935c] font-semibold"
+                        : "bg-white/40 border-white/60 text-[#2e2e2e] hover:bg-white/60 hover:border-[#98935c]/50 " +
+                          (isHighCount ? "font-semibold" : "font-medium")
+                    }`}
                   >
-                    {day && (
-                      <>
-                        <div className="text-xs font-medium text-gray-500">{day.date}</div>
-                        {day.trades.length > 0 && (
-                          <div
-                            className="text-right text-sm font-semibold"
-                            style={{ color: day.pnl >= 0 ? COLORS.profit : COLORS.loss }}
-                          >
-                            {day.pnl >= 0 ? "+" : ""}${day.pnl.toFixed(0)}
+                    {modelName}
+                    <span className={`ml-1.5 font-normal ${isSelected ? "text-white/80" : "text-gray-500"}`}>({count})</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Two columns: left = notes + trade list, right = Flow Lab */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6 min-h-0">
+            {notesKey ? (
+              <>
+                {/* Discipline notes for this tag or model */}
+                <GlassCard>
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                    Discipline notes — {selectedModelTag ? `Model: ${selectedModelTag}` : selectedTag}
+                  </label>
+                  <textarea
+                    value={disciplineNotes[notesKey] ?? ""}
+                    onChange={(e) =>
+                      setDisciplineNotes((prev) => ({ ...prev, [notesKey]: e.target.value }))
+                    }
+                    placeholder="Reflections and actions for this tag. Use Flow Lab to push AI insights here."
+                    className="w-full min-h-[120px] bg-white/50 border border-white/60 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-sm font-light leading-relaxed text-[#2e2e2e]"
+                  />
+                </GlassCard>
+
+                {/* Filtered trade list */}
+                <GlassCard>
+                  <div className="flex justify-between items-end mb-4 pb-4 border-b border-white/50">
+                    <h3 className="display-font text-2xl text-[#2e2e2e]">
+                      Trades {selectedModelTag ? `model: "${selectedModelTag}"` : `tagged "${selectedTag}"`}
+                    </h3>
+                    <span className="text-sm font-medium text-gray-500">
+                      {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"}
+                    </span>
+                  </div>
+                  {filteredTrades.length === 0 ? (
+                    <p className="text-sm font-light text-gray-500">No trades with this tag.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[400px] overflow-y-auto">
+                      {filteredTrades.map((t) => (
+                        <div
+                          key={t.id}
+                          onClick={() => setSelectedTrade(t)}
+                          className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 transition-colors ${
+                            t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(t.instrument)}</span>
+                            <span
+                              className="font-medium"
+                              style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+                            >
+                              {formatPnl(t.pnl, 2)}
+                            </span>
                           </div>
-                        )}
-                      </>
-                    )}
-                  </GlassCard>
-                ))}
-                <div
-                  className="flex items-center justify-center rounded-xl bg-white/20 text-sm font-semibold"
-                  style={{ color: week.weeklyPnL >= 0 ? COLORS.profit : COLORS.loss }}
-                >
-                  {week.weeklyPnL >= 0 ? "+" : ""}${week.weeklyPnL.toFixed(0)}
-                </div>
-              </div>
-            ))}
+                          <div className="text-xs font-medium text-gray-500">
+                            {new Date(t.entryTime).toLocaleTimeString()} — {new Date(t.exitTime).toLocaleTimeString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </GlassCard>
+              </>
+            ) : (
+              <GlassCard className="flex items-center justify-center min-h-[200px]">
+                <p className="text-sm font-light text-gray-500">Select a tag or model above to view trades and discipline notes.</p>
+              </GlassCard>
+            )}
           </div>
 
-          {selectedDate && (
-            <div className="w-full fade-in pb-8">
-              <GlassCard>
-                <div className="flex justify-between items-end mb-6 border-b border-white/50 pb-4">
-                  <h3 className="display-font text-3xl text-[#2e2e2e]">
-                    {new Date(selectedDate).toLocaleDateString(undefined, {
-                      weekday: "long",
-                      month: "long",
-                      day: "numeric",
-                    })}
-                  </h3>
-                  <span className="text-sm font-medium text-gray-500">
-                    {tradesForSelectedDate.length} Executions
-                  </span>
-                </div>
-                {tradesForSelectedDate.length === 0 ? (
-                  <p className="text-sm font-light text-gray-500">No executions recorded.</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {tradesForSelectedDate.map((t) => (
-                      <div
-                        key={t.id}
-                        onClick={() => setSelectedTrade(t)}
-                        className="p-4 bg-white/50 rounded-xl cursor-pointer hover:bg-white/80 border border-white/60 transition-all hover:shadow-md"
-                      >
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="font-semibold text-lg text-[#2e2e2e]">{t.instrument}</span>
-                          <span
-                            className="font-medium"
-                            style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
-                          >
-                            {t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="text-xs font-medium text-gray-500">
-                          {new Date(t.entryTime).toLocaleTimeString()} -{" "}
-                          {new Date(t.exitTime).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </GlassCard>
-            </div>
-          )}
+          <div className="lg:col-span-1">
+            <AICoachPanel
+              metrics={metrics}
+              onPushNote={(note) => {
+                if (selectedTag) {
+                  setDisciplineNotes((prev) => ({
+                    ...prev,
+                    [selectedTag]: (prev[selectedTag] ?? "").concat(prev[selectedTag] ? "\n\n" : "", note),
+                  }));
+                }
+              }}
+            />
+          </div>
         </div>
       </div>
     );
   };
 
   const renderStrategy = () => (
-    <div className="fade-in max-w-2xl">
-      <h2 className="display-font text-5xl mb-6 text-[#2e2e2e]">Model Architecture</h2>
+    <div className="fade-in space-y-8 max-w-4xl">
+      <div>
+        <h2 className="display-font text-5xl mb-2 text-[#2e2e2e]">Models</h2>
+        <p className="text-sm font-light text-gray-500 max-w-2xl">
+          Build a card-based playbook for each model. Tap a model card to reveal an interactive
+          checklist you can run in real time during execution.
+        </p>
+      </div>
 
-      <button
-        onClick={handleGenerateStrategy}
-        disabled={isGeneratingStrat}
-        className="w-full mb-6 bg-white/60 text-[#2e2e2e] border border-white/80 shadow-sm rounded-xl p-4 font-semibold tracking-wide hover:bg-white/90 transition-colors flex justify-center items-center gap-2"
-      >
-        {isGeneratingStrat ? "Architecting Framework..." : "✨ Auto-Complete Framework with AI"}
-      </button>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {/* Add model card */}
+        <button
+          type="button"
+          onClick={() => {
+            resetDraftModel();
+            setExpandedModelId("new");
+          }}
+          className={`flex flex-col items-center justify-center min-w-[180px] h-[220px] rounded-2xl border-2 border-dashed transition-colors ${
+            expandedModelId === "new"
+              ? "bg-white/80 border-[#98935c] text-[#2e2e2e]"
+              : "border-gray-300 bg-white/40 text-[#2e2e2e] hover:border-[#98935c] hover:bg-white/70"
+          }`}
+        >
+          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] flex items-center justify-center mb-2 text-2xl leading-none">
+            +
+          </div>
+          <span className="text-sm font-semibold">Add Model</span>
+        </button>
 
-      <GlassCard>
-        <div className="space-y-6">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
-              Model Name
-            </label>
-            <input
-              type="text"
-              value={stratName}
-              onChange={(e) => setStratName(e.target.value)}
-              className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-medium"
-              placeholder="e.g., London Breakout"
-            />
+        {models.map((model) => {
+          const isActive = expandedModelId === model.id;
+          const Icon = MODEL_ICONS[model.iconId] ?? LucideTarget;
+          return (
+            <button
+              key={model.id}
+              type="button"
+              onClick={() => setExpandedModelId(isActive ? null : model.id)}
+              className={`flex flex-col items-center justify-center min-w-[180px] h-[220px] rounded-2xl border-2 transition-colors ${
+                isActive
+                  ? "bg-[#98935c] border-[#98935c] text-white shadow-inner"
+                  : "bg-white/60 border-transparent text-[#2e2e2e] hover:border-[#98935c]/50"
+              }`}
+            >
+              <div
+                className={`w-10 h-10 rounded-full border flex items-center justify-center mb-3 ${
+                  isActive ? "border-white/80" : "border-[#2e2e2e]"
+                }`}
+              >
+                <Icon size={22} strokeWidth={2} className={isActive ? "text-white" : ""} />
+              </div>
+              <span className="text-xs font-semibold uppercase tracking-widest">
+                {model.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Expanded content */}
+      {expandedModelId === "new" && (
+        <GlassCard className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                Model Name
+              </label>
+              <input
+                type="text"
+                value={draftModelName}
+                onChange={(e) => setDraftModelName(e.target.value)}
+                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-medium"
+                placeholder="e.g., London Breakout"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                Icon
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(MODEL_ICONS).map(([id, IconComponent]) => {
+                  const labels: Record<string, string> = {
+                    target: "Target",
+                    brain: "Cognition",
+                    zap: "Zap",
+                    trendingUp: "Trending",
+                    barChart: "Bar Chart",
+                    activity: "Activity",
+                    crosshair: "Crosshair",
+                    circleDot: "Circle",
+                    lineChart: "Line Chart",
+                  };
+                  const active = draftIconId === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setDraftIconId(id)}
+                      className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2 text-xs font-medium transition-colors min-w-[72px] ${
+                        active
+                          ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
+                          : "bg-white/50 text-[#2e2e2e] border-white/60 hover:border-[#98935c]"
+                      }`}
+                    >
+                      <IconComponent size={18} className="mb-1" />
+                      {labels[id] ?? id}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
-              Context / Setup
-            </label>
-            <textarea
-              value={stratContext}
-              onChange={(e) => setStratContext(e.target.value)}
-              className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[100px]"
-              placeholder="HTF trend alignment, Time of day..."
-            />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-3">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                Context &amp; Setup
+              </label>
+              <textarea
+                value={draftContext}
+                onChange={(e) => setDraftContext(e.target.value)}
+                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                placeholder="Market conditions, HTF context, session, structure you require before even thinking about an entry."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                Entry
+              </label>
+              <textarea
+                value={draftEntry}
+                onChange={(e) => setDraftEntry(e.target.value)}
+                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                placeholder="Primary entry signal, candle confirmation, execution pattern."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                Risk
+              </label>
+              <textarea
+                value={draftRisk}
+                onChange={(e) => setDraftRisk(e.target.value)}
+                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                placeholder="Hard stop rules, max loss per trade, account risk."
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
-              Entry Trigger
-            </label>
-            <input
-              type="text"
-              value={stratTrigger}
-              onChange={(e) => setStratTrigger(e.target.value)}
-              className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-medium"
-              placeholder="Order block touch, 5m close..."
-            />
+
+          <div className="border-t border-white/60 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                Optional Sections
+              </span>
+              <span className="text-[11px] text-gray-400">
+                Start with the core, then layer precision from your playbook.
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              {optionalSectionTemplates.map((tpl) => {
+                const enabled = enabledOptionalSections[tpl.id];
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() =>
+                      setEnabledOptionalSections((prev) => ({
+                        ...prev,
+                        [tpl.id]: !prev[tpl.id],
+                      }))
+                    }
+                    className={`text-left px-3 py-2 rounded-xl text-xs font-medium border transition-colors ${
+                      enabled
+                        ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
+                        : "bg-white/40 text-[#2e2e2e] border-white/60 hover:border-[#98935c]"
+                    }`}
+                  >
+                    {tpl.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="space-y-4">
+              {optionalSectionTemplates
+                .filter((tpl) => enabledOptionalSections[tpl.id])
+                .map((tpl) => (
+                  <div key={tpl.id}>
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                      {tpl.label}
+                    </label>
+                    <textarea
+                      value={optionalSectionValues[tpl.id] ?? ""}
+                      onChange={(e) =>
+                        setOptionalSectionValues((prev) => ({
+                          ...prev,
+                          [tpl.id]: e.target.value,
+                        }))
+                      }
+                      className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                      placeholder={tpl.placeholder}
+                    />
+                  </div>
+                ))}
+            </div>
           </div>
-          <button className="w-full bg-[#2e2e2e] text-white rounded-xl p-4 font-semibold tracking-wide hover:bg-black transition-colors">
-            Save Model Framework
-          </button>
-        </div>
-      </GlassCard>
+
+          <div className="border-t border-white/60 pt-4 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                Custom Inputs
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setCustomSections((prev) => [
+                    ...prev,
+                    { id: `c_${Date.now()}_${prev.length}`, label: "", value: "" },
+                  ])
+                }
+                className="text-[11px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e]"
+              >
+                + Add custom input
+              </button>
+            </div>
+            {customSections.length > 0 && (
+              <div className="space-y-4">
+                {customSections.map((section, idx) => (
+                  <div key={section.id} className="space-y-2">
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={section.label}
+                        onChange={(e) =>
+                          setCustomSections((prev) =>
+                            prev.map((c, i) =>
+                              i === idx ? { ...c, label: e.target.value } : c,
+                            ),
+                          )
+                        }
+                        className="flex-1 bg-white/50 border border-white/60 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#98935c]"
+                        placeholder="Label (e.g., Trade Management, Add-on rules...)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCustomSections((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="text-[11px] text-gray-500 hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <textarea
+                      value={section.value}
+                      onChange={(e) =>
+                        setCustomSections((prev) =>
+                          prev.map((c, i) =>
+                            i === idx ? { ...c, value: e.target.value } : c,
+                          ),
+                        )
+                      }
+                      className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                      placeholder="Checklist style notes for this input."
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                resetDraftModel();
+                setExpandedModelId(null);
+              }}
+              className="px-5 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-white/40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveModel}
+              className="px-5 py-2 rounded-xl text-sm font-semibold tracking-wide bg-[#2e2e2e] text-white hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={!draftModelName.trim()}
+            >
+              Save Strategy
+            </button>
+          </div>
+        </GlassCard>
+      )}
+
+      {expandedModelId && expandedModelId !== "new" && (
+        <GlassCard className="space-y-6">
+          {(() => {
+            const model = models.find((m) => m.id === expandedModelId);
+            if (!model) return null;
+
+            const checklistKeyFor = (sectionId: string, idx: number) =>
+              `${model.id}:${sectionId}:${idx}`;
+            const ModelIcon = MODEL_ICONS[model.iconId] ?? LucideTarget;
+
+            return (
+              <>
+                <div className="flex justify-between items-end gap-4 border-b border-white/60 pb-4">
+                  <div>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-9 h-9 rounded-full border border-[#2e2e2e] flex items-center justify-center">
+                        <ModelIcon size={20} />
+                      </div>
+                      <h3 className="display-font text-3xl text-[#2e2e2e]">{model.name}</h3>
+                    </div>
+                    <p className="text-[11px] text-gray-500 uppercase tracking-[0.2em]">
+                      Real-time execution checklist
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-gray-400 mr-2">
+                      Created {new Date(model.createdAt).toLocaleDateString()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadDraftFromModel(model);
+                        setExpandedModelId("new");
+                      }}
+                      className="p-2 rounded-lg text-gray-500 hover:bg-white/50 hover:text-[#2e2e2e] transition-colors"
+                      title="Edit model"
+                    >
+                      <LucidePencil size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveModel(model.id)}
+                      className="p-2 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                      title="Remove model"
+                    >
+                      <LucideTrash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {model.sections.map((section) => {
+                    const lines = section.value
+                      ? section.value.split("\n").filter((ln) => ln.trim().length > 0)
+                      : [];
+                    return (
+                      <div key={section.label} className="space-y-3">
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                          {section.label}
+                        </div>
+                        {lines.length === 0 ? (
+                          <p className="text-xs font-light text-gray-400">
+                            No details captured yet.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {lines.map((line, idx) => {
+                              const key = checklistKeyFor(section.id, idx);
+                              const checked = !!checklistState[key];
+                              return (
+                                <label
+                                  key={key}
+                                  className={`flex items-start gap-2 text-xs cursor-pointer ${
+                                    checked ? "text-[#2e2e2e]" : "text-gray-600"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() =>
+                                      setChecklistState((prev) => ({
+                                        ...prev,
+                                        [key]: !prev[key],
+                                      }))
+                                    }
+                                    className="mt-0.5 h-3.5 w-3.5 rounded border-gray-400 text-[#2e2e2e] focus:ring-[#98935c]"
+                                  />
+                                  <span className={checked ? "line-through opacity-70" : ""}>
+                                    {line}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
+        </GlassCard>
+      )}
     </div>
   );
 
@@ -1213,14 +2067,38 @@ export default function App() {
     <div className="flex min-h-screen">
       {renderSidebar()}
       <main className="flex-1 p-8 lg:p-12 overflow-y-auto relative">
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="absolute top-3 left-3 z-10 p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors hidden md:block shrink-0 bg-white/30 backdrop-blur-sm"
+          title="Toggle Sidebar"
+        >
+          {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
+        </button>
         {activeTab === "dashboard" && renderDashboard()}
         {activeTab === "recap" && renderDailyRecap()}
-        {activeTab === "calendar" && <CalendarView />}
+        {activeTab === "calendar" && (
+          <CalendarView
+            trades={trades}
+            setSelectedTrade={setSelectedTrade}
+            viewMonth={calendarViewMonth}
+            setViewMonth={setCalendarViewMonth}
+            viewYear={calendarViewYear}
+            selectedDate={calendarSelectedDate}
+            setSelectedDate={setCalendarSelectedDate}
+          />
+        )}
+        {activeTab === "discipline" && <DisciplineView />}
         {activeTab === "strategy" && renderStrategy()}
       </main>
       {selectedTrade && (
         <TradeDetailsModal
           trade={selectedTrade}
+          allTags={(() => {
+            const set = new Set<string>();
+            trades.forEach((t) => t.tags.forEach((tag) => set.add(tag)));
+            return [...set].sort();
+          })()}
+          modelTags={models.map((m) => m.name)}
           onClose={() => setSelectedTrade(null)}
           onSave={(updatedTrade) => {
             setTrades(trades.map((t) => (t.id === updatedTrade.id ? updatedTrade : t)));
@@ -1240,11 +2118,9 @@ type MetricsShape = {
 } | null;
 
 const AICoachPanel = ({
-  activeTrades,
   metrics,
   onPushNote,
 }: {
-  activeTrades: Array<{ id: string; notes: string }>;
   metrics: MetricsShape;
   onPushNote: (note: string, tradeId?: string) => void;
 }) => {
@@ -1264,7 +2140,7 @@ const AICoachPanel = ({
     setChat((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
 
-    const sysInst = `You are a trading coach in "The Performance Lab". Synthesize Mark Douglas, Jim Simons, and Fabio Valentini. Be direct, analytical, devoid of emotional cushioning. Address the user as Ryon. Metrics: PF: ${metrics.profitFactor.toFixed(2)}, Discipline: ${metrics.disciplineScore.toFixed(0)}%.`;
+    const sysInst = `You are a trading coach in "The Performance Lab". Synthesize the perspectives of Mark Douglas, Jim Simons, and Fabio Valentini—but do not name or cite them in your replies; give advice in your own voice without attribution. Be direct, analytical, devoid of emotional cushioning. Address the user as Ryon. Metrics: PF: ${metrics.profitFactor.toFixed(2)}, Discipline: ${metrics.disciplineScore.toFixed(0)}%. Keep responses concise: 2–4 sentences unless the user explicitly asks for more. No long paragraphs or bullet lists.`;
     const response = await generateAIResponse(userMsg, sysInst);
     setChat((prev) => [...prev, { role: "ai", content: response }]);
     setLoading(false);
@@ -1341,115 +2217,284 @@ const AICoachPanel = ({
 
 type Trade = ReturnType<typeof generateMockTrades>[0];
 
+// Map broker/instrument symbol to TradingView widget symbol (exchange:symbol).
+// Handles futures (CME_MINI continuous ES1!/NQ1!, CME, COMEX, CBOT), crypto (BINANCE), and US stocks.
+function toTradingViewSymbol(instrument: string): string {
+  const raw = (instrument || "").trim().toUpperCase();
+  if (!raw) return "AMEX:SPY";
+
+  // CME E-mini index futures: TradingView uses CME_MINI and continuous contract (ES1!, NQ1!) so chart always resolves.
+  // Check longer roots first so MES/MNQ don't match ES/NQ.
+  const cmeMiniRoots: [string, string][] = [
+    ["M2K", "M2K1!"],
+    ["MNQ", "MNQ1!"],
+    ["MES", "MES1!"],
+    ["RTY", "RTY1!"],
+    ["ES", "ES1!"],
+    ["NQ", "NQ1!"],
+  ];
+  for (const [root, continuous] of cmeMiniRoots) {
+    if (raw === root || raw.startsWith(root)) return `CME_MINI:${continuous}`;
+  }
+
+  // Other futures: COMEX (GC, SI), CBOT (ZW, ZS, ZM), CME (CL, NG, etc.)
+  const comexRoots = ["GC", "SI", "MGC", "SIL"];
+  const cbotRoots = ["ZW", "ZS", "ZM", "ZN", "ZF", "ZB"];
+  const cmeRoots = ["CL", "EC", "EMD", "MCL", "HG", "NG", "RB", "HO"];
+  const monthCode = /^[A-Z]{2,4}[FGHJKMNQUVXZ]\d$/;
+  const continuous = /^[A-Z]{2,4}1!$/;
+  const isFuture =
+    monthCode.test(raw) ||
+    continuous.test(raw) ||
+    comexRoots.some((r) => raw === r || raw.startsWith(r)) ||
+    cbotRoots.some((r) => raw === r || raw.startsWith(r)) ||
+    cmeRoots.some((r) => raw === r || raw.startsWith(r));
+  if (isFuture) {
+    if (cbotRoots.some((r) => raw.startsWith(r))) return `CBOT:${raw}`;
+    if (comexRoots.some((r) => raw.startsWith(r))) return `COMEX:${raw}`;
+    return `CME:${raw}`;
+  }
+
+  // Crypto: BTC, ETH, etc. or pair like BTCUSDT, ETHUSD
+  const cryptoMatch = raw.match(/^([A-Z]{2,10})(USDT|USD|BUSD)?$/);
+  const cryptoBase = ["BTC", "ETH", "SOL", "DOGE", "XRP", "ADA", "AVAX", "LINK", "DOT", "MATIC", "UNI", "LTC", "BCH", "ATOM", "ETC", "XLM", "ALGO", "FIL", "APT", "ARB", "OP", "SUI", "SEI", "NEAR", "INJ", "TIA", "PEPE", "SHIB", "WIF"];
+  if (cryptoMatch) {
+    const base = cryptoMatch[1];
+    const quote = (cryptoMatch[2] || "USDT").toUpperCase();
+    if (cryptoBase.includes(base) || base.length <= 5) {
+      const pair = quote === "USDT" ? `${base}USDT` : `${base}USD`;
+      return `BINANCE:${pair}`;
+    }
+  }
+  if (raw.includes("USDT") || raw.includes("USD")) {
+    const base = raw.replace(/(USDT|USD)$/, "");
+    if (base.length >= 2 && base.length <= 10) return `BINANCE:${raw}`;
+  }
+
+  // Stocks: default NASDAQ, common NYSE/AMEX tickers
+  const nyseStocks = ["SPY", "QQQ", "IWM", "DIA", "BAC", "JPM", "XOM", "T", "VZ", "PFE", "WMT", "DIS", "GE"];
+  const amexStocks = ["SPY", "IWM", "QQQ", "DIA"];
+  if (amexStocks.includes(raw)) return `AMEX:${raw}`;
+  if (nyseStocks.includes(raw)) return `NYSE:${raw}`;
+  return `NASDAQ:${raw}`;
+}
+
+// TradingView widget — config must be script.textContent (not innerHTML). Mount only after container has layout (see TradeDetailsModal).
+const TV_CHART_HEIGHT = 420; // Fixed height so chart stays inside modal frame with overflow hidden
+
+function getWidgetConfig(symbol: string) {
+  return {
+    allow_symbol_change: false,
+    calendar: false,
+    details: false,
+    hide_side_toolbar: true,
+    hide_top_toolbar: true,
+    hide_legend: true,
+    hide_volume: true,
+    hotlist: false,
+    interval: "240",
+    locale: "en",
+    save_image: false,
+    style: "1",
+    symbol,
+    theme: "light",
+    timezone: "Etc/UTC",
+    backgroundColor: "rgba(235, 235, 235, 1)",
+    gridColor: "rgba(46, 46, 46, 0)",
+    watchlist: [],
+    withdateranges: false,
+    compareSymbols: [],
+    studies: [],
+    autosize: true,
+  };
+}
+
+function triggerChartResize(): void {
+  window.dispatchEvent(new Event("resize"));
+}
+
+function tradingViewSymbolUrl(symbol: string): string {
+  const slug = symbol.replace(":", "-");
+  return `https://www.tradingview.com/symbols/${slug}/`;
+}
+
+const TradingViewWidget = memo(function TradingViewWidget({ symbol }: { symbol: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const tvSymbol = toTradingViewSymbol(symbol);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    let cancelled = false;
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.textContent = JSON.stringify(getWidgetConfig(tvSymbol));
+
+    script.onload = () => {
+      if (cancelled) return;
+      triggerChartResize();
+      timeouts.push(setTimeout(() => !cancelled && triggerChartResize(), 100));
+      timeouts.push(setTimeout(() => !cancelled && triggerChartResize(), 300));
+      timeouts.push(setTimeout(() => !cancelled && triggerChartResize(), 600));
+    };
+    node.appendChild(script);
+
+    return () => {
+      cancelled = true;
+      timeouts.forEach(clearTimeout);
+      script.remove();
+    };
+  }, [tvSymbol]);
+
+  return (
+    <div
+      className="tradingview-widget-container"
+      ref={containerRef}
+      style={{ height: "100%", width: "100%", minHeight: 0, overflow: "hidden" }}
+    >
+      <div
+        className="tradingview-widget-container__widget"
+        style={{ height: "calc(100% - 32px)", width: "100%", minHeight: 0 }}
+      />
+      <div className="tradingview-widget-copyright">
+        <a
+          href={tradingViewSymbolUrl(tvSymbol)}
+          rel="noopener nofollow"
+          target="_blank"
+        >
+          <span className="blue-text">{symbol} chart</span>
+        </a>
+        <span className="trademark"> by TradingView</span>
+      </div>
+    </div>
+  );
+});
+
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
 const TradeDetailsModal = ({
   trade,
+  allTags,
+  modelTags,
   onClose,
   onSave,
 }: {
   trade: Trade;
+  allTags: string[];
+  modelTags: string[];
   onClose: () => void;
   onSave: (t: Trade) => void;
 }) => {
   const [notes, setNotes] = useState(trade.notes);
-  const [isGeneratingNote, setIsGeneratingNote] = useState(false);
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-
-  const handleGeneratePostMortem = async () => {
-    setIsGeneratingNote(true);
-    const durationMins = ((trade.exitTime - trade.entryTime) / 60000).toFixed(1);
-    const prompt = `Analyze this execution: Instrument: ${trade.instrument}, PnL: $${trade.pnl.toFixed(2)}, Duration: ${durationMins} minutes. Provide a 2-sentence, clinical post-mortem on what this result and hold time implies about the execution.`;
-    const sysInst =
-      "You are an institutional trading coach. Be objective, clinical, and brief. No pleasantries.";
-    const response = await generateAIResponse(prompt, sysInst);
-
-    setNotes((prev) => prev + (prev ? "\n\n" : "") + "✨ AI Post-Mortem: " + response);
-    setIsGeneratingNote(false);
-  };
+  const [tags, setTags] = useState<string[]>(trade.tags);
+  const [modelTag, setModelTag] = useState<string | null>(trade.modelTag ?? null);
+  const [chartImages, setChartImages] = useState<string[]>(
+    trade.chartImages?.length ? trade.chartImages : trade.chartImage ? [trade.chartImage] : []
+  );
+  const [isDragging, setIsDragging] = useState(false);
+  const [tagDropdownOpen, setTagDropdownOpen] = useState(false);
+  const [customTagInput, setCustomTagInput] = useState("");
+  const [chartLightboxOpen, setChartLightboxOpen] = useState(false);
+  const [chartLightboxIndex, setChartLightboxIndex] = useState(0);
+  const [strength, setStrength] = useState(trade.strength);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let chart: { remove: () => void } | undefined;
+    setStrength(trade.strength);
+  }, [trade.id, trade.strength]);
+  useEffect(() => {
+    setModelTag(trade.modelTag ?? null);
+  }, [trade.id, trade.modelTag]);
 
-    const renderChart = () => {
-      if (!chartContainerRef.current || typeof window === "undefined") return;
-      const LW = (window as unknown as { LightweightCharts?: { createChart: (el: HTMLElement, opts: object) => { addLineSeries: (opts: object) => { setData: (d: object) => void; setMarkers: (m: object) => void }; timeScale: () => { fitContent: () => void }; remove: () => void } } }).LightweightCharts;
-      if (!LW) return;
-      chartContainerRef.current.innerHTML = "";
+  const recentTags = allTags.filter((t) => !tags.includes(t));
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (trimmed && !tags.includes(trimmed)) setTags((prev) => [...prev, trimmed]);
+    setTagDropdownOpen(false);
+    setCustomTagInput("");
+  };
+  const removeTag = (tag: string) => setTags((prev) => prev.filter((t) => t !== tag));
 
-      const chartInstance = LW.createChart(chartContainerRef.current, {
-        layout: {
-          background: { type: "solid", color: "transparent" },
-          textColor: "#2e2e2e",
-          fontFamily: "Inter",
-        },
-        grid: {
-          vertLines: { color: "rgba(0,0,0,0.05)" },
-          horzLines: { color: "rgba(0,0,0,0.05)" },
-        },
-        width: chartContainerRef.current.clientWidth,
-        height: 300,
-        timeScale: { timeVisible: true, secondsVisible: true },
-      });
-      chart = chartInstance;
-
-      const lineSeries = chartInstance.addLineSeries({
-        color: COLORS.accent,
-        lineWidth: 2,
-        crosshairMarkerVisible: true,
-      });
-
-      const entryT = Math.floor(trade.entryTime / 1000);
-      const exitT = Math.floor(trade.exitTime / 1000);
-
-      const startPrice = trade.entryPrice ?? (trade.pnl > 0 ? 4000 : 4050);
-      const endPrice = trade.exitPrice ?? startPrice + (trade.pnl > 0 ? 10 : -10);
-
-      const data = [
-        { time: entryT - 600, value: startPrice },
-        { time: entryT, value: startPrice },
-        { time: exitT, value: endPrice },
-        { time: exitT + 600, value: endPrice },
-      ];
-
-      lineSeries.setData(data);
-
-      lineSeries.setMarkers([
-        {
-          time: entryT,
-          position: trade.isLong ? "belowBar" : "aboveBar",
-          color: trade.isLong ? "#42bda8" : "#f43636",
-          shape: trade.isLong ? "arrowUp" : "arrowDown",
-          text: `Entry: ${startPrice}`,
-        },
-        {
-          time: exitT,
-          position: trade.isLong ? "aboveBar" : "belowBar",
-          color: "#2e2e2e",
-          shape: trade.isLong ? "arrowDown" : "arrowUp",
-          text: `Exit: ${endPrice}`,
-        },
-      ]);
-
-      chartInstance.timeScale().fitContent();
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) setTagDropdownOpen(false);
     };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
-    if (typeof window === "undefined") return;
-    if (!(window as unknown as { LightweightCharts?: unknown }).LightweightCharts) {
-      const script = document.createElement("script");
-      script.src =
-        "https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js";
-      script.async = true;
-      script.onload = renderChart;
-      document.body.appendChild(script);
-    } else {
-      renderChart();
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setChartLightboxOpen(false);
+    };
+    if (chartLightboxOpen) {
+      document.addEventListener("keydown", handleEscape);
+      document.body.style.overflow = "hidden";
     }
-
     return () => {
-      if (chart && "remove" in chart) chart.remove();
+      document.removeEventListener("keydown", handleEscape);
+      document.body.style.overflow = "";
     };
-  }, [trade]);
+  }, [chartLightboxOpen]);
+
+  const processFiles = (files: FileList | File[]) => {
+    const toAdd: string[] = [];
+    const pending = Array.from(files).filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type));
+    if (pending.length === 0) return;
+    const maxSlots = 2;
+    const doNext = (i: number) => {
+      if (i >= pending.length) {
+        setChartImages((prev) => [...prev, ...toAdd].slice(0, maxSlots));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        toAdd.push(reader.result as string);
+        doNext(i + 1);
+      };
+      reader.readAsDataURL(pending[i]);
+    };
+    doNext(0);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files?.length) processFiles(files);
+    e.target.value = "";
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    if (files?.length) processFiles(files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const removeChartImageAt = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation();
+    setChartImages((prev) => prev.filter((_, i) => i !== index));
+    if (chartLightboxOpen) setChartLightboxOpen(false);
+  };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm fade-in">
       <GlassCard className="w-full max-w-4xl max-h-[90vh] overflow-y-auto !bg-[#ebebeb]/90 relative">
         <button
@@ -1460,69 +2505,257 @@ const TradeDetailsModal = ({
         </button>
         <div className="flex items-end justify-between mb-8 pr-12">
           <div>
-            <h2 className="display-font text-4xl text-[#2e2e2e]">{trade.instrument} Execution</h2>
-            <div className="text-sm font-medium text-gray-500 mt-1">
-              {new Date(trade.entryTime).toLocaleString()}
+            <h2 className="display-font text-4xl text-[#2e2e2e]">{formatSymbolDisplay(trade.instrument)} Trade</h2>
+            <div className="text-sm font-medium text-gray-500 mt-1 space-y-0.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                {(() => {
+                  const isLong = trade.isLong ?? (trade.entryPrice != null && trade.exitPrice != null ? trade.exitPrice > trade.entryPrice : null);
+                  return isLong != null && (
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${isLong ? "bg-emerald-500/20 text-emerald-700" : "bg-rose-500/20 text-rose-700"}`}>
+                      {isLong ? "Long" : "Short"}
+                    </span>
+                  );
+                })()}
+                {trade.lotSize != null && trade.lotSize > 0 && (() => {
+                  const qty = trade.lotSize!;
+                  return (
+                    <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-white/60 text-gray-600 border border-white/60">
+                      {qty} {qty === 1 ? "contract" : "contracts"}
+                    </span>
+                  );
+                })()}
+                <span>
+                Entry {trade.entryPrice != null ? `$${trade.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ""}
+                {trade.entryPrice != null && trade.exitPrice != null ? " → " : ""}
+                Exit {trade.exitPrice != null ? `$${trade.exitPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : ""}
+                </span>
+              </div>
+              <div>
+                {new Date(trade.entryTime).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", hour12: true })} – {new Date(trade.exitTime).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", hour12: true })}
+              </div>
             </div>
           </div>
-          <div
-            className="text-5xl tracking-tight display-font"
-            style={{ color: trade.pnl >= 0 ? COLORS.profit : COLORS.loss }}
-          >
-            {trade.pnl >= 0 ? "+" : ""}${trade.pnl.toFixed(2)}
+          <div className="flex flex-col items-end gap-3 h-[59px]">
+            <div
+              className="text-5xl tracking-tight display-font"
+              style={{ color: trade.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+            >
+              {formatPnl(trade.pnl, 2)}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                Trade Strength:
+              </span>
+              <StrengthMeter value={strength} onChange={setStrength} />
+            </div>
           </div>
         </div>
+        <div className="mb-2">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+            Chart Images
+          </span>
+        </div>
         <div
-          className="w-full h-[300px] bg-white/40 rounded-xl mb-6 overflow-hidden relative"
-          ref={chartContainerRef}
-        ></div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          <div className="flex flex-col">
-            <div className="flex justify-between items-center mb-2">
-              <label className="text-xs font-semibold uppercase tracking-widest text-gray-500">
-                Trade Notes & Coach Feedback
-              </label>
-              <button
-                onClick={handleGeneratePostMortem}
-                disabled={isGeneratingNote}
-                className="text-[10px] font-semibold uppercase tracking-widest flex items-center gap-1 text-[#98935c] hover:text-black transition-colors bg-white/50 px-2 py-1 rounded-md border border-white/60"
-              >
-                {isGeneratingNote ? "Synthesizing..." : "✨ Auto Post-Mortem"}
-              </button>
+          className="w-full bg-white/40 rounded-xl mb-6 overflow-hidden relative"
+          style={{ height: TV_CHART_HEIGHT, maxWidth: "100%", minHeight: 0 }}
+        >
+          {chartImages.length > 0 ? (
+            <div className="w-full h-full min-h-0 flex flex-col bg-[#ebebeb]/50 rounded-xl overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-auto p-2 flex gap-3">
+                {chartImages.slice(0, 2).map((src, idx) => (
+                  <div key={idx} className="relative group rounded-lg overflow-hidden bg-black/5 flex-1 min-w-0 w-1/2 aspect-video">
+                    <img
+                      src={src}
+                      alt={`Chart ${idx + 1} for ${formatSymbolDisplay(trade.instrument)}`}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                        <button
+                          type="button"
+                          onClick={() => { setChartLightboxIndex(idx); setChartLightboxOpen(true); }}
+                          className="px-2 py-1 rounded-md bg-white/90 text-[#2e2e2e] text-[10px] font-semibold uppercase tracking-widest hover:bg-white shadow-sm"
+                        >
+                          View full size
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => removeChartImageAt(e, idx)}
+                          className="px-2 py-1 rounded-md bg-white/90 text-gray-600 text-[10px] font-semibold uppercase tracking-widest hover:text-red-600 hover:bg-white shadow-sm"
+                        >
+                          Remove
+                        </button>
+                    </div>
+                  </div>
+                  ))}
+              </div>
+              {chartImages.length < 2 && (
+                <div className="p-2 border-t border-white/40">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-[10px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e]"
+                  >
+                    + Add more images
+                  </button>
+                </div>
+              )}
             </div>
+          ) : (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              className={`w-full h-full min-h-[300px] flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
+                isDragging ? "border-[#98935c] bg-white/40" : "border-gray-300 bg-white/20 hover:border-gray-400 hover:bg-white/30"
+              }`}
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                Drop chart images or click to upload
+              </span>
+              <span className="text-[10px] text-gray-400">JPEG, PNG, GIF, WebP — multiple allowed</span>
+            </div>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          onChange={handleFileChange}
+          className="hidden"
+          aria-hidden
+          multiple
+        />
+        <div className="mb-6">
+          <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+            Model
+          </label>
+          <p className="text-[11px] text-gray-400 mb-2">
+            Which saved model was this trade executed with? (Separate from tags.)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setModelTag(null)}
+              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors focus:outline-none focus:ring-2 focus:ring-[#98935c] focus:ring-offset-1 ${
+                !modelTag
+                  ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
+                  : "bg-white/80 border-gray-200 text-[#2e2e2e] hover:bg-white hover:border-[#98935c]/50"
+              }`}
+            >
+              None
+            </button>
+            {modelTags.map((name) => {
+              const selected = modelTag === name;
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setModelTag(selected ? null : name)}
+                  className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors focus:outline-none focus:ring-2 focus:ring-[#98935c] focus:ring-offset-1 ${
+                    selected
+                      ? "bg-[#98935c] text-white border-[#98935c]"
+                      : "bg-white/80 border-gray-200 text-[#2e2e2e] hover:bg-white hover:border-[#98935c]/50"
+                  }`}
+                >
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div className="flex flex-col min-h-0">
+            <label className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              Trade Notes & Coach Feedback
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="flex-1 w-full min-h-[160px] bg-white/50 border border-white/60 rounded-xl p-4 focus:outline-none text-sm font-light leading-relaxed text-[#2e2e2e]"
+              className="w-full min-h-[120px] max-h-[250px] resize-y bg-white/50 border border-white/60 rounded-xl p-4 focus:outline-none text-sm font-light leading-relaxed text-[#2e2e2e]"
               placeholder="Record emotional state and technical observations..."
+              style={{ resize: "vertical" }}
             />
           </div>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
-                Media Attachment
-              </label>
-              <div className="w-full h-24 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center text-[10px] font-semibold uppercase tracking-widest text-gray-400 bg-white/20">
-                Mock S3 Upload
-              </div>
-            </div>
-            <div>
+          <div className="flex flex-col min-h-0">
+            <div className="relative flex-1 min-h-[180px]" ref={tagDropdownRef}>
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
                 Tags
               </label>
               <div className="flex flex-wrap gap-2">
-                {trade.tags.map((tag) => (
+                {tags.map((tag) => (
                   <span
                     key={tag}
-                    className="px-3 py-1 bg-white/80 rounded-full text-xs font-medium border border-gray-200"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/80 rounded-full text-xs font-medium border border-gray-200"
                   >
                     {tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="rounded-full p-0.5 hover:bg-gray-200 text-gray-500 hover:text-[#2e2e2e] focus:outline-none"
+                      aria-label={`Remove ${tag}`}
+                    >
+                      <Icons.X />
+                    </button>
                   </span>
                 ))}
-                <button className="px-3 py-1 bg-transparent border border-gray-400 rounded-full text-xs font-medium text-gray-500 hover:bg-white/50">
+                <button
+                  type="button"
+                  onClick={() => setTagDropdownOpen((o) => !o)}
+                  className="px-3 py-1 bg-transparent border border-gray-400 rounded-full text-xs font-medium text-gray-500 hover:bg-white/50 focus:outline-none"
+                >
                   +
                 </button>
               </div>
+              {tagDropdownOpen && (
+                <div className="absolute left-0 bottom-full mb-2 w-56 max-h-48 overflow-y-auto bg-white/95 backdrop-blur border border-white/60 rounded-xl shadow-lg z-10 py-2">
+                  {recentTags.length > 0 && (
+                    <>
+                      {recentTags.slice(0, 12).map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => addTag(tag)}
+                          className="w-full text-left px-4 py-2 text-sm font-medium text-[#2e2e2e] hover:bg-[#98935c]/10 focus:outline-none"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                      <div className="border-t border-gray-200 my-1" />
+                    </>
+                  )}
+                  <div className="px-4 py-2">
+                    <input
+                      type="text"
+                      value={customTagInput}
+                      onChange={(e) => setCustomTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addTag(customTagInput);
+                        }
+                      }}
+                      placeholder="Custom tag..."
+                      className="w-full bg-white/50 border border-white/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addTag(customTagInput)}
+                      className="mt-2 w-full py-1.5 text-xs font-semibold uppercase tracking-widest text-[#98935c] hover:text-black"
+                    >
+                      Add custom
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1534,13 +2767,38 @@ const TradeDetailsModal = ({
             Cancel
           </button>
           <button
-            onClick={() => onSave({ ...trade, notes })}
+            onClick={() => onSave({ ...trade, notes, chartImages, tags, strength, modelTag: modelTag ?? undefined })}
             className="px-6 py-2 bg-[#2e2e2e] text-white rounded-xl text-sm font-semibold tracking-wide hover:bg-black"
           >
-            Save Parameters
+            Save
           </button>
         </div>
       </GlassCard>
     </div>
+    {chartLightboxOpen && chartImages[chartLightboxIndex] && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm fade-in"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Chart full size"
+        onClick={() => setChartLightboxOpen(false)}
+      >
+        <button
+          type="button"
+          onClick={() => setChartLightboxOpen(false)}
+          className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors [&_svg]:w-5 [&_svg]:h-5"
+          aria-label="Close"
+        >
+          <Icons.X />
+        </button>
+        <img
+          src={chartImages[chartLightboxIndex]}
+          alt={`Chart for ${formatSymbolDisplay(trade.instrument)} — full size`}
+          className="max-w-[95vw] max-h-[95vh] w-auto h-auto object-contain"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+    )}
+    </>
   );
 };

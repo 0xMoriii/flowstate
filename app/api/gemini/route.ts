@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-// Try in order; many keys have 1.5-flash, newer keys have 2.0
-const MODELS_TO_TRY = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
+// Prefer 2.5 Flash (2.0-flash is no longer available for new users); fallback to 1.5-flash for free tier
+const MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
 
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.NEXT_PUBLIC_GEMINI_API_KEY;
@@ -29,6 +29,10 @@ export async function POST(request: Request) {
     ...(systemInstruction && typeof systemInstruction === "string" && {
       systemInstruction: { parts: [{ text: systemInstruction }] },
     }),
+    generationConfig: {
+      maxOutputTokens: 512,
+      temperature: 0.7,
+    },
   };
 
   let lastError = "";
@@ -50,9 +54,9 @@ export async function POST(request: Request) {
 
       const message = data?.error?.message ?? data?.error ?? `HTTP ${response.status}`;
       lastError = typeof message === "string" ? message : JSON.stringify(message);
-      // 404 = model not found, 403 = permission/model not allowed → try next model
-      if (response.status === 404 || response.status === 403) continue;
-      // 400, 429, 500 etc. → return so user sees the error
+      // 404 = model not found, 403 = permission denied, 429 = quota exceeded → try next model
+      if (response.status === 404 || response.status === 403 || response.status === 429) continue;
+      // 400, 500 etc. → return so user sees the error
       return NextResponse.json({ error: lastError }, { status: response.status });
     } catch (err) {
       lastError = err instanceof Error ? err.message : "Request failed";
