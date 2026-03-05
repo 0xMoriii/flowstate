@@ -26,6 +26,7 @@ import {
   LineChart as LucideLineChart,
   Pencil as LucidePencil,
   Trash2 as LucideTrash2,
+  Merge as LucideMerge,
   type LucideIcon,
 } from "lucide-react";
 
@@ -334,6 +335,7 @@ type CalendarTrade = ReturnType<typeof generateMockTrades>[number];
 
 function CalendarView({
   trades,
+  setTrades,
   setSelectedTrade,
   viewMonth,
   setViewMonth,
@@ -342,6 +344,7 @@ function CalendarView({
   setSelectedDate,
 }: {
   trades: ReturnType<typeof generateMockTrades>;
+  setTrades: React.Dispatch<React.SetStateAction<ReturnType<typeof generateMockTrades>>>;
   setSelectedTrade: (t: CalendarTrade | null) => void;
   viewMonth: number;
   setViewMonth: React.Dispatch<React.SetStateAction<number>>;
@@ -350,7 +353,56 @@ function CalendarView({
   setSelectedDate: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
   const [compactCalendar, setCompactCalendar] = useState(false);
+  const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
   const calendarContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleCombineSelected = () => {
+    if (selectedForCombine.size < 2) return;
+    const toCombine = trades.filter((t) => selectedForCombine.has(t.id));
+    if (toCombine.length < 2) return;
+    const entryTime = Math.min(...toCombine.map((t) => t.entryTime));
+    const exitTime = Math.max(...toCombine.map((t) => t.exitTime));
+    const combinedPnL = toCombine.reduce((sum, t) => sum + t.pnl, 0);
+    const lastTrade = toCombine.reduce((a, b) => (a.exitTime > b.exitTime ? a : b));
+    const allTags = [...new Set(toCombine.flatMap((t) => t.tags))];
+    const allNotes = toCombine.map((t) => t.notes).filter(Boolean).join("\n\n");
+    const allChartImages = toCombine.flatMap((t) => t.chartImages ?? (t.chartImage ? [t.chartImage] : []));
+    const firstTrade = toCombine.reduce((a, b) => (a.entryTime < b.entryTime ? a : b));
+    const combined: CalendarTrade = {
+      ...firstTrade,
+      id: `combined_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      entryTime,
+      exitTime,
+      pnl: combinedPnL,
+      capitalAfter: lastTrade.capitalAfter,
+      tags: allTags,
+      notes: allNotes || firstTrade.notes,
+      chartImages: allChartImages.length > 0 ? allChartImages : undefined,
+      chartImage: undefined,
+    };
+    setTrades((prev) => {
+      const idsToRemove = new Set(toCombine.map((t) => t.id));
+      const kept = prev.filter((t) => !idsToRemove.has(t.id));
+      const inserted = [...kept, combined].sort((a, b) => a.entryTime - b.entryTime);
+      return inserted;
+    });
+    setSelectedForCombine(new Set());
+    setSelectedTrade(combined);
+  };
+
+  const toggleSelectForCombine = (e: React.MouseEvent, tradeId: string) => {
+    e.stopPropagation();
+    setSelectedForCombine((prev) => {
+      const next = new Set(prev);
+      if (next.has(tradeId)) next.delete(tradeId);
+      else next.add(tradeId);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setSelectedForCombine(new Set());
+  }, [selectedDate]);
 
   useEffect(() => {
     const el = calendarContainerRef.current;
@@ -533,7 +585,7 @@ function CalendarView({
         {selectedDate && (
           <div className="w-full fade-in pb-8">
             <GlassCard>
-              <div className="flex justify-between items-end mb-6 border-b border-white/50 pb-4">
+              <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-white/50 pb-4">
                 <h3 className="display-font text-3xl text-[#2e2e2e]">
                   {new Date(selectedDate).toLocaleDateString(undefined, {
                     weekday: "long",
@@ -541,36 +593,69 @@ function CalendarView({
                     day: "numeric",
                   })}
                 </h3>
-                <span className="text-sm font-medium text-gray-500">
-                  {tradesForSelectedDate.length} Trades
-                </span>
+                <div className="flex items-center gap-3">
+                  {selectedForCombine.size >= 2 && (
+                    <button
+                      type="button"
+                      onClick={handleCombineSelected}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#98935c]/20 text-[#2e2e2e] hover:bg-[#98935c]/30 transition-colors"
+                    >
+                      <LucideMerge className="w-4 h-4" />
+                      Combine {selectedForCombine.size} trades
+                    </button>
+                  )}
+                  <span className="text-sm font-medium text-gray-500">
+                    {tradesForSelectedDate.length} Trades
+                  </span>
+                </div>
               </div>
               {tradesForSelectedDate.length === 0 ? (
                 <p className="text-sm font-light text-gray-500">No trades recorded.</p>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {tradesForSelectedDate.map((t) => (
-                    <div
-                      key={t.id}
-                      onClick={() => setSelectedTrade(t)}
-                      className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 transition-colors ${t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
-                    >
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(t.instrument)}</span>
-                        <span
-                          className="font-medium"
-                          style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+                <>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Select two or more trades (e.g. same position with multiple take-profits) to combine P&amp;L into one.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {tradesForSelectedDate.map((t) => (
+                      <div
+                        key={t.id}
+                        onClick={() => setSelectedTrade(t)}
+                        className={`relative p-4 pl-10 rounded-xl cursor-pointer border transition-colors ${selectedForCombine.has(t.id) ? "border-[#98935c] bg-[#98935c]/10" : "border-transparent hover:bg-white/50"} ${t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSelectForCombine(e, t.id)}
+                          className="absolute left-3 top-4 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+                          style={{
+                            borderColor: selectedForCombine.has(t.id) ? COLORS.accent : "#9ca3af",
+                            backgroundColor: selectedForCombine.has(t.id) ? COLORS.accent : "transparent",
+                          }}
+                          aria-label={selectedForCombine.has(t.id) ? "Deselect for combine" : "Select for combine"}
                         >
-                          {formatPnl(t.pnl, 2)}
-                        </span>
+                          {selectedForCombine.has(t.id) && (
+                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </button>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(t.instrument)}</span>
+                          <span
+                            className="font-medium"
+                            style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+                          >
+                            {formatPnl(t.pnl, 2)}
+                          </span>
+                        </div>
+                        <div className="text-xs font-medium text-gray-500">
+                          {new Date(t.entryTime).toLocaleTimeString()} -{" "}
+                          {new Date(t.exitTime).toLocaleTimeString()}
+                        </div>
                       </div>
-                      <div className="text-xs font-medium text-gray-500">
-                        {new Date(t.entryTime).toLocaleTimeString()} -{" "}
-                        {new Date(t.exitTime).toLocaleTimeString()}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </>
               )}
             </GlassCard>
           </div>
@@ -1672,7 +1757,7 @@ export default function App() {
         </p>
       </div>
 
-      <div className="flex gap-4 overflow-x-auto pb-2">
+      <div className="flex flex-wrap gap-4 pb-2">
         {/* Add model card */}
         <button
           type="button"
@@ -1680,16 +1765,16 @@ export default function App() {
             resetDraftModel();
             setExpandedModelId("new");
           }}
-          className={`flex flex-col items-center justify-center min-w-[180px] h-[220px] rounded-2xl border-2 border-dashed transition-colors ${
+          className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 border-dashed transition-colors px-3 ${
             expandedModelId === "new"
               ? "bg-white/80 border-[#98935c] text-[#2e2e2e]"
               : "border-gray-300 bg-white/40 text-[#2e2e2e] hover:border-[#98935c] hover:bg-white/70"
           }`}
         >
-          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] flex items-center justify-center mb-2 text-2xl leading-none">
+          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0">
             +
           </div>
-          <span className="text-sm font-semibold">Add Model</span>
+          <span className="text-sm font-semibold text-center">Add Model</span>
         </button>
 
         {models.map((model) => {
@@ -1700,20 +1785,20 @@ export default function App() {
               key={model.id}
               type="button"
               onClick={() => setExpandedModelId(isActive ? null : model.id)}
-              className={`flex flex-col items-center justify-center min-w-[180px] h-[220px] rounded-2xl border-2 transition-colors ${
+              className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 transition-colors px-3 ${
                 isActive
                   ? "bg-[#98935c] border-[#98935c] text-white shadow-inner"
                   : "bg-white/60 border-transparent text-[#2e2e2e] hover:border-[#98935c]/50"
               }`}
             >
               <div
-                className={`w-10 h-10 rounded-full border flex items-center justify-center mb-3 ${
+                className={`w-10 h-10 rounded-full border flex items-center justify-center mb-3 flex-shrink-0 ${
                   isActive ? "border-white/80" : "border-[#2e2e2e]"
                 }`}
               >
                 <Icon size={22} strokeWidth={2} className={isActive ? "text-white" : ""} />
               </div>
-              <span className="text-xs font-semibold uppercase tracking-widest">
+              <span className="text-xs font-semibold uppercase tracking-widest text-center break-words line-clamp-3 w-full">
                 {model.name}
               </span>
             </button>
@@ -2068,6 +2153,7 @@ export default function App() {
         {activeTab === "calendar" && (
           <CalendarView
             trades={trades}
+            setTrades={setTrades}
             setSelectedTrade={setSelectedTrade}
             viewMonth={calendarViewMonth}
             setViewMonth={setCalendarViewMonth}
