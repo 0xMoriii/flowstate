@@ -167,6 +167,7 @@ const generateMockTrades = () => {
     lotSize?: number; // number of contracts (from imports or manual)
     chartImage?: string; // legacy single image (migrated to chartImages)
     chartImages?: string[]; // base64 data URLs for attached chart/screenshots
+    combinedFromKeys?: string[]; // when this trade is a combined trade, keys (instrument|entryTime|exitTime) of constituent trades so CSV import doesn't re-add them
   }> = [];
   let currentCapital = 50000;
   const now = new Date();
@@ -356,6 +357,9 @@ function CalendarView({
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
   const calendarContainerRef = useRef<HTMLDivElement>(null);
 
+  const tradeKey = (t: { instrument: string; entryTime: number; exitTime: number }) =>
+    `${t.instrument}|${t.entryTime}|${t.exitTime}`;
+
   const handleCombineSelected = () => {
     if (selectedForCombine.size < 2) return;
     const toCombine = trades.filter((t) => selectedForCombine.has(t.id));
@@ -379,6 +383,7 @@ function CalendarView({
       notes: allNotes || firstTrade.notes,
       chartImages: allChartImages.length > 0 ? allChartImages : undefined,
       chartImage: undefined,
+      combinedFromKeys: toCombine.map((t) => tradeKey(t)),
     };
     setTrades((prev) => {
       const idsToRemove = new Set(toCombine.map((t) => t.id));
@@ -980,14 +985,44 @@ export default function App() {
         }
 
         parsedTrades.sort((a, b) => a.entryTime - b.entryTime);
-        let currentCapital = 50000;
-        const withCapital = parsedTrades.map((t) => {
-          currentCapital += t.pnl;
-          return { ...t, capitalAfter: currentCapital };
+        const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 })); // capital recomputed below after merge
+
+        setTrades((prevTrades) => {
+          const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
+            `${t.instrument}|${t.entryTime}|${t.exitTime}`;
+          const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
+          const kept = prevTrades.filter(
+            (t) => !t.tags?.includes("Tradovate Import") || isCombined(t)
+          );
+          const existingTradovate = prevTrades.filter(
+            (t) => t.tags?.includes("Tradovate Import") && !isCombined(t)
+          );
+          const keysConsumedByCombined = new Set<string>(
+            kept.flatMap((t) => (isCombined(t) && t.combinedFromKeys ? t.combinedFromKeys : []))
+          );
+          const tradovateMap = new Map<string, (typeof parsedWithCapital)[0]>();
+          for (const t of existingTradovate) {
+            tradovateMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
+          }
+          for (const t of parsedWithCapital) {
+            const key = tradeKeyForMerge(t);
+            if (keysConsumedByCombined.has(key)) continue;
+            tradovateMap.set(key, { ...t });
+          }
+          const mergedTradovate = Array.from(tradovateMap.values());
+          const combined = [...kept, ...mergedTradovate].sort((a, b) => a.entryTime - b.entryTime);
+
+          let runningCapital = 50000;
+          const withCapital = combined.map((t) => {
+            runningCapital += t.pnl;
+            return { ...t, capitalAfter: runningCapital };
+          });
+
+          return withCapital.reverse() as ReturnType<typeof generateMockTrades>;
         });
 
-        setTrades(withCapital.reverse() as ReturnType<typeof generateMockTrades>);
-        setImportStatus(`Successfully imported ${parsedTrades.length} trades.`);
+        const addedCount = parsedTrades.length;
+        setImportStatus(`Successfully imported ${addedCount} trade(s). Previous data kept and merged.`);
         setTimeout(() => setImportStatus(""), 4000);
       } catch (err) {
         setImportStatus(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
