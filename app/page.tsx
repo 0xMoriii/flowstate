@@ -1435,7 +1435,7 @@ export default function App() {
             ))
           )}
         </div>
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 lg:pt-[4.5rem]">
           <AICoachPanel
             metrics={metrics}
             onPushNote={(note, tradeId) => {
@@ -1724,7 +1724,7 @@ export default function App() {
       {/* Expanded content */}
       {expandedModelId === "new" && (
         <GlassCard className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
+          <div className="space-y-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
                 Model Name
@@ -1743,31 +1743,20 @@ export default function App() {
               </label>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(MODEL_ICONS).map(([id, IconComponent]) => {
-                  const labels: Record<string, string> = {
-                    target: "Target",
-                    brain: "Cognition",
-                    zap: "Zap",
-                    trendingUp: "Trending",
-                    barChart: "Bar Chart",
-                    activity: "Activity",
-                    crosshair: "Crosshair",
-                    circleDot: "Circle",
-                    lineChart: "Line Chart",
-                  };
                   const active = draftIconId === id;
                   return (
                     <button
                       key={id}
                       type="button"
                       onClick={() => setDraftIconId(id)}
-                      className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2 text-xs font-medium transition-colors min-w-[72px] ${
+                      className={`flex items-center justify-center rounded-xl border w-9 h-9 transition-colors ${
                         active
                           ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
                           : "bg-white/50 text-[#2e2e2e] border-white/60 hover:border-[#98935c]"
                       }`}
+                      title={id}
                     >
-                      <IconComponent size={18} className="mb-1" />
-                      {labels[id] ?? id}
+                      <IconComponent size={18} />
                     </button>
                   );
                 })}
@@ -2069,7 +2058,7 @@ export default function App() {
       <main className="flex-1 p-8 lg:p-12 overflow-y-auto relative">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute top-3 left-3 z-10 p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors hidden md:block shrink-0 bg-white/30 backdrop-blur-sm"
+          className="absolute top-3 left-3 z-10 p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors shrink-0 bg-white/30 backdrop-blur-sm"
           title="Toggle Sidebar"
         >
           {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
@@ -2140,14 +2129,14 @@ const AICoachPanel = ({
     setChat((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
 
-    const sysInst = `You are a trading coach in "The Performance Lab". Synthesize the perspectives of Mark Douglas, Jim Simons, and Fabio Valentini—but do not name or cite them in your replies; give advice in your own voice without attribution. Be direct, analytical, devoid of emotional cushioning. Address the user as Ryon. Metrics: PF: ${metrics.profitFactor.toFixed(2)}, Discipline: ${metrics.disciplineScore.toFixed(0)}%. Keep responses concise: 2–4 sentences unless the user explicitly asks for more. No long paragraphs or bullet lists.`;
+    const sysInst = `You are a trading coach in "The Performance Lab". Synthesize the perspectives of Mark Douglas, Jim Simons, and Fabio Valentini—but do not name or cite them in your replies. Be direct, analytical, devoid of emotional cushioning. Metrics: PF: ${metrics.profitFactor.toFixed(2)}, Discipline: ${metrics.disciplineScore.toFixed(0)}%. Be substantive and insightful: give enough detail to be useful within 1-2 paragraphs.`;
     const response = await generateAIResponse(userMsg, sysInst);
     setChat((prev) => [...prev, { role: "ai", content: response }]);
     setLoading(false);
   };
 
   return (
-    <GlassCard className="flex flex-col h-[600px]">
+    <GlassCard className="flex flex-col h-[800px]">
       <div className="flex items-center mb-4 pb-4 border-b border-white/50">
         <h3 className="display-font text-3xl text-[#2e2e2e]">Flow Lab</h3>
       </div>
@@ -2185,18 +2174,18 @@ const AICoachPanel = ({
         )}
         <div ref={chatEndRef} />
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-2 min-w-0">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          className="flex-1 bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none text-sm font-medium"
+          className="flex-1 min-w-0 bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none text-sm font-medium"
           placeholder="Query the coach..."
         />
         <button
           onClick={handleSend}
-          className="bg-[#2e2e2e] text-white p-3 rounded-xl hover:bg-black transition-colors"
+          className="bg-[#2e2e2e] text-white p-3 rounded-xl hover:bg-black transition-colors shrink-0"
         >
           <svg
             width="16"

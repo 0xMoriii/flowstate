@@ -7,7 +7,10 @@ export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY ?? process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Missing Gemini API key. Set GEMINI_API_KEY or NEXT_PUBLIC_GEMINI_API_KEY in .env.local" },
+      {
+        error:
+          "Missing Gemini API key. Set GEMINI_API_KEY or NEXT_PUBLIC_GEMINI_API_KEY in .env.local (dev) or in your hosting provider's environment variables (production). Check https://aistudio.google.com/apikey",
+      },
       { status: 500 }
     );
   }
@@ -30,8 +33,8 @@ export async function POST(request: Request) {
       systemInstruction: { parts: [{ text: systemInstruction }] },
     }),
     generationConfig: {
-      maxOutputTokens: 512,
-      temperature: 0.7,
+      maxOutputTokens: 2048,
+      temperature: 0.9,
     },
   };
 
