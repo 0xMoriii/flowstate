@@ -27,6 +27,7 @@ import {
   Pencil as LucidePencil,
   Trash2 as LucideTrash2,
   Merge as LucideMerge,
+  Menu as LucideMenu,
   type LucideIcon,
 } from "lucide-react";
 
@@ -124,6 +125,19 @@ const Icons = {
     </svg>
   ),
 };
+
+/** Match (max-width: 767px) for mobile layout. */
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return isMobile;
+}
 
 /** Normalize futures symbol for display: ESM4, MESH6, ESH6 -> ES; NQM4, MNQH6, NQH6 -> NQ; etc. */
 function formatSymbolDisplay(symbol: string): string {
@@ -343,6 +357,7 @@ function CalendarView({
   viewYear,
   selectedDate,
   setSelectedDate,
+  isMobile = false,
 }: {
   trades: ReturnType<typeof generateMockTrades>;
   setTrades: React.Dispatch<React.SetStateAction<ReturnType<typeof generateMockTrades>>>;
@@ -352,7 +367,9 @@ function CalendarView({
   viewYear: number;
   selectedDate: string | null;
   setSelectedDate: React.Dispatch<React.SetStateAction<string | null>>;
+  isMobile?: boolean;
 }) {
+  const hideWeeklyColumn = isMobile;
   const [compactCalendar, setCompactCalendar] = useState(false);
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
   const calendarContainerRef = useRef<HTMLDivElement>(null);
@@ -461,7 +478,7 @@ function CalendarView({
       <div
         className={`flex mb-6 ${compactCalendar ? "flex-col gap-4 items-start" : "justify-between items-end"}`}
       >
-        <div>
+        <div className={compactCalendar ? "w-full" : ""}>
           <h2
             className={`display-font text-[#2e2e2e] ${compactCalendar ? "text-3xl" : "text-5xl"}`}
           >
@@ -485,7 +502,7 @@ function CalendarView({
             </button>
           </div>
         </div>
-        <div className={compactCalendar ? "" : "text-right"}>
+        <div className={compactCalendar ? "w-full text-right" : "text-right"}>
           <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-2">
             Monthly PnL
           </div>
@@ -500,14 +517,14 @@ function CalendarView({
 
       <div className="flex flex-col gap-8">
         <div ref={calendarContainerRef} className="w-full overflow-x-auto" style={{ minWidth: 0 }}>
-          <div className="flex flex-col min-w-[600px] pl-8 pr-8 pb-8">
-            <div className={`grid grid-cols-8 mb-2 ${compactCalendar ? "gap-1" : "gap-2"}`}>
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Weekly"].map((d, i) => (
+          <div className={`flex flex-col ${hideWeeklyColumn ? "min-w-0 pl-2 pr-2 sm:pl-4 sm:pr-4 md:pl-8 md:pr-8" : "min-w-[600px] pl-8 pr-8"} pb-8`}>
+            <div className={`grid mb-2 ${hideWeeklyColumn ? "grid-cols-7" : "grid-cols-8"} ${compactCalendar ? "gap-1" : "gap-2"}`}>
+              {(hideWeeklyColumn ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Weekly"]).map((d, i) => (
                 <div
                   key={d}
-                  className={`text-center font-semibold text-gray-500 uppercase ${compactCalendar ? "text-[8px] tracking-wide" : "text-[10px] tracking-wider"} ${i === 7 ? "text-[#2e2e2e]" : ""}`}
+                  className={`text-center font-semibold text-gray-500 uppercase ${compactCalendar ? "text-[8px] tracking-wide" : "text-[10px] tracking-wider"} ${!hideWeeklyColumn && i === 7 ? "text-[#2e2e2e]" : ""}`}
                 >
-                  {compactCalendar && i === 7 ? "Wk" : d}
+                  {!hideWeeklyColumn && compactCalendar && i === 7 ? "Wk" : d}
                 </div>
               ))}
             </div>
@@ -515,14 +532,14 @@ function CalendarView({
             {weeks.map((week, wIdx) => (
               <div
                 key={wIdx}
-                className={`grid grid-cols-8 mb-2 ${compactCalendar ? "gap-1" : "gap-2"}`}
+                className={`grid ${hideWeeklyColumn ? "grid-cols-7" : "grid-cols-8"} mb-2 ${compactCalendar ? "gap-1" : "gap-2"}`}
               >
                 {week.days.map((day, dIdx) => (
                   <GlassCard
                     key={dIdx}
                     onClick={day && day.trades.length > 0 ? () => setSelectedDate(day.fullDate) : undefined}
-                    className={`p-3 flex flex-col justify-start items-start gap-0 transition-all duration-200
-                      ${compactCalendar ? "h-10 min-h-10" : "h-[100px] min-h-[100px] justify-between"}
+                    className={`!p-2 md:!p-3 flex flex-col justify-start items-start gap-0 transition-all duration-200
+                      ${compactCalendar ? "h-16" : "h-[100px] min-h-[100px] justify-between"}
                       ${!day ? "invisible" : ""} 
                       ${day && day.trades.length === 0 ? "cursor-default" : "cursor-pointer"}
                       ${day?.fullDate === selectedDate
@@ -549,7 +566,7 @@ function CalendarView({
                     {day && (
                       <>
                         <div
-                          className={`font-extrabold w-full text-right ${compactCalendar ? "text-xs" : "text-xl"} ${day.fullDate === selectedDate ? "text-white" : "text-[var(--color-gray-500)]"}`}
+                          className={`font-extrabold w-full text-right ${compactCalendar ? "text-sm" : "text-xl"} ${day.fullDate === selectedDate ? "text-white" : "text-[var(--color-gray-500)]"}`}
                         >
                           {day.date}
                         </div>
@@ -576,12 +593,14 @@ function CalendarView({
                     )}
                   </GlassCard>
                 ))}
-                <div
-                  className={`flex items-center justify-center rounded-xl bg-white/20 font-semibold ${compactCalendar ? "text-xs" : "text-sm"}`}
-                  style={{ color: week.weeklyPnL >= 0 ? COLORS.profit : COLORS.loss }}
-                >
-                  {formatPnl(week.weeklyPnL, 0)}
-                </div>
+                {!hideWeeklyColumn && (
+                  <div
+                    className={`flex items-center justify-center rounded-xl bg-white/20 font-semibold ${compactCalendar ? "text-xs" : "text-sm"}`}
+                    style={{ color: week.weeklyPnL >= 0 ? COLORS.profit : COLORS.loss }}
+                  >
+                    {formatPnl(week.weeklyPnL, 0)}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -670,19 +689,31 @@ function CalendarView({
   );
 }
 
+const NAV_ITEMS = [
+  { id: "dashboard", icon: LucideLayoutDashboard, label: "Dashboard" },
+  { id: "recap", icon: LucideList, label: "Daily Recap" },
+  { id: "calendar", icon: LucideCalendar, label: "Calendar" },
+  { id: "discipline", icon: LucideBrain, label: "Discipline" },
+  { id: "strategy", icon: LucideTarget, label: "Models" },
+] as const;
+
 // --- MAIN APP ---
 export default function App() {
+  const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [dashboardScoreTooltipOpen, setDashboardScoreTooltipOpen] = useState(false);
   const [trades, setTrades] = useState<ReturnType<typeof generateMockTrades>>(() => {
     const stored = loadTradesFromStorage();
     return stored && stored.length > 0 ? stored : generateMockTrades();
   });
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
   const [importStatus, setImportStatus] = useState("");
-  const [quote] = useState(
-    () => MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]
-  );
+  const [quote, setQuote] = useState(MARK_DOUGLAS_QUOTES[0]);
+  useEffect(() => {
+    setQuote(MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]);
+  }, []);
 
   const [chartTimeframe, setChartTimeframe] = useState("ALL");
 
@@ -1150,7 +1181,7 @@ export default function App() {
 
   const renderSidebar = () => (
     <div
-      className={`${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 backdrop-blur-xl border-r border-white/50 flex flex-col px-4 pb-4 pt-[49px] shrink-0 z-20`}
+      className={`hidden md:flex ${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 backdrop-blur-xl border-r border-white/50 flex-col px-4 pb-4 pt-[49px] shrink-0 z-20`}
     >
       <div className="flex flex-col gap-4 mb-8 mt-4">
         <div className="w-full relative h-10 min-h-[2.5rem] flex items-center">
@@ -1177,13 +1208,7 @@ export default function App() {
       </div>
 
       <nav className="flex flex-col space-y-3 flex-1 min-h-0">
-        {[
-          { id: "dashboard", icon: LucideLayoutDashboard, label: "Dashboard" },
-          { id: "recap", icon: LucideList, label: "Daily Recap" },
-          { id: "calendar", icon: LucideCalendar, label: "Calendar" },
-          { id: "discipline", icon: LucideBrain, label: "Discipline" },
-          { id: "strategy", icon: LucideTarget, label: "Models" },
-        ].map((item) => {
+        {NAV_ITEMS.map((item) => {
           const IconComponent = item.icon;
           return (
           <button
@@ -1225,19 +1250,101 @@ export default function App() {
     </div>
   );
 
+  const renderMobileNav = () => (
+    <>
+      <header className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between h-14 px-4 bg-white/30 backdrop-blur-xl border-b border-white/50 shrink-0">
+        <div className="relative w-8 h-8">
+          <Image src="/FLOWSTATE%20Icon.svg" alt="Flowstate" fill className="object-contain object-left" />
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen((o) => !o)}
+          className="p-2 rounded-lg hover:bg-white/50 text-gray-600 aria-pressed:bg-white/50"
+          aria-label="Toggle menu"
+          aria-expanded={mobileMenuOpen}
+        >
+          <LucideMenu size={24} strokeWidth={2} />
+        </button>
+      </header>
+      {mobileMenuOpen && (
+        <>
+          <div
+            className="fixed top-14 left-0 right-0 bottom-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
+            aria-hidden
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="fixed top-14 left-0 right-0 z-50 max-h-[calc(100vh-3.5rem)] overflow-y-auto md:hidden bg-white/95 backdrop-blur-xl border-b border-white/60 shadow-lg">
+            <nav className="flex flex-col p-4 gap-1">
+              {NAV_ITEMS.map((item) => {
+                const IconComponent = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setMobileMenuOpen(false);
+                    }}
+                    className={`flex items-center p-3 rounded-xl transition-all text-left ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/60"}`}
+                  >
+                    <span style={{ color: activeTab === item.id ? COLORS.accent : "#6b7280" }}>
+                      <IconComponent size={20} strokeWidth={2} />
+                    </span>
+                    <span className="ml-4 font-medium">{item.label}</span>
+                  </button>
+                );
+              })}
+              <div className="pt-4 mt-2 border-t border-white/50 relative">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCSVUpload}
+                  className="hidden"
+                  id="csv-upload-mobile"
+                />
+                <label
+                  htmlFor="csv-upload-mobile"
+                  className="flex items-center justify-start px-4 py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium w-full"
+                >
+                  <Icons.Upload /> <span className="ml-3">Import CSV</span>
+                </label>
+                {importStatus && (
+                  <div className="absolute bottom-full left-4 right-4 mb-2 z-10 bg-white/95 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center">
+                    {importStatus}
+                  </div>
+                )}
+              </div>
+            </nav>
+          </div>
+        </>
+      )}
+    </>
+  );
+
   const renderDashboard = () => (
     <div className="space-y-10 fade-in pb-12">
       <div className="mb-4">
-        <h2 className="display-font text-6xl text-[#2e2e2e] tracking-tight">Dashboard</h2>
+        <h2 className="display-font text-4xl md:text-6xl text-[#2e2e2e] tracking-tight">Dashboard</h2>
         <p className="text-sm text-gray-500 italic mt-4 border-l-2 border-[#98935c] pl-4 font-light">
           &quot;{quote}&quot; <span className="font-semibold">— Mark Douglas</span>
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40">
+        <div
+          className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40"
+          onMouseEnter={() => !isMobile && setDashboardScoreTooltipOpen(true)}
+          onMouseLeave={() => !isMobile && setDashboardScoreTooltipOpen(false)}
+          onClick={() => isMobile && setDashboardScoreTooltipOpen((o) => !o)}
+          role={isMobile ? "button" : undefined}
+          tabIndex={isMobile ? 0 : undefined}
+          onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardScoreTooltipOpen((o) => !o); } } : undefined}
+        >
           <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
             Trader Score
+            {isMobile && (
+              <span className="ml-1.5 text-gray-400 font-normal">(tap for breakdown)</span>
+            )}
           </div>
           <div className="display-font text-7xl text-[#2e2e2e] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {metrics?.score.toFixed(1)}
@@ -1251,7 +1358,11 @@ export default function App() {
               PRIOR 30D
             </div>
           )}
-          <div className="absolute top-[105%] left-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+          <div
+            className={`absolute top-[105%] left-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 z-50 transition-all duration-200 ${
+              dashboardScoreTooltipOpen ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
+            }`}
+          >
             <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-3 border-b border-gray-200 pb-2">
               Score Breakdown
             </h4>
@@ -1503,8 +1614,8 @@ export default function App() {
     const todaysTrades = trades.filter((t) => new Date(t.entryTime).toDateString() === today);
 
     return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 fade-in">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="flex flex-col gap-8 fade-in">
+        <div className="space-y-6">
           <h2 className="display-font text-5xl mb-6 text-[#2e2e2e]">Daily Recap</h2>
           {todaysTrades.length === 0 ? (
             <GlassCard>
@@ -1555,20 +1666,18 @@ export default function App() {
             ))
           )}
         </div>
-        <div className="lg:col-span-1 lg:pt-[4.5rem]">
-          <AICoachPanel
-            metrics={metrics}
-            onPushNote={(note, tradeId) => {
-              if (!tradeId && todaysTrades.length > 0) tradeId = todaysTrades[0].id;
-              if (tradeId)
-                setTrades(
-                  trades.map((t) =>
-                    t.id === tradeId ? { ...t, notes: t.notes + "\n\nAI Coach: " + note } : t
-                  )
-                );
-            }}
-          />
-        </div>
+        <AICoachPanel
+          metrics={metrics}
+          onPushNote={(note, tradeId) => {
+            if (!tradeId && todaysTrades.length > 0) tradeId = todaysTrades[0].id;
+            if (tradeId)
+              setTrades(
+                trades.map((t) =>
+                  t.id === tradeId ? { ...t, notes: t.notes + "\n\nAI Coach: " + note } : t
+                )
+              );
+          }}
+        />
       </div>
     );
   };
@@ -1800,16 +1909,16 @@ export default function App() {
             resetDraftModel();
             setExpandedModelId("new");
           }}
-          className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 border-dashed transition-colors px-3 ${
+          className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 border-dashed transition-colors px-3 text-center ${
             expandedModelId === "new"
               ? "bg-white/80 border-[#98935c] text-[#2e2e2e]"
               : "border-gray-300 bg-white/40 text-[#2e2e2e] hover:border-[#98935c] hover:bg-white/70"
           }`}
         >
-          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0">
+          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0 shrink-0">
             +
           </div>
-          <span className="text-sm font-semibold text-center">Add Model</span>
+          <span className="block w-full text-sm font-semibold text-center">Add Model</span>
         </button>
 
         {models.map((model) => {
@@ -1820,20 +1929,20 @@ export default function App() {
               key={model.id}
               type="button"
               onClick={() => setExpandedModelId(isActive ? null : model.id)}
-              className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 transition-colors px-3 ${
+              className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 transition-colors px-3 text-center ${
                 isActive
                   ? "bg-[#98935c] border-[#98935c] text-white shadow-inner"
                   : "bg-white/60 border-transparent text-[#2e2e2e] hover:border-[#98935c]/50"
               }`}
             >
               <div
-                className={`w-10 h-10 rounded-full border flex items-center justify-center mb-3 flex-shrink-0 ${
+                className={`w-10 h-10 rounded-full border flex items-center justify-center mb-3 flex-shrink-0 shrink-0 ${
                   isActive ? "border-white/80" : "border-[#2e2e2e]"
                 }`}
               >
                 <Icon size={22} strokeWidth={2} className={isActive ? "text-white" : ""} />
               </div>
-              <span className="text-xs font-semibold uppercase tracking-widest text-center break-words line-clamp-3 w-full">
+              <span className="block w-full min-w-0 text-xs font-semibold uppercase tracking-widest text-center break-words line-clamp-3">
                 {model.name}
               </span>
             </button>
@@ -2173,33 +2282,37 @@ export default function App() {
   );
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen min-h-dvh">
       {renderSidebar()}
-      <main className="flex-1 p-8 lg:p-12 overflow-y-auto relative">
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute top-3 left-3 z-10 p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors shrink-0 bg-white/30 backdrop-blur-sm"
-          title="Toggle Sidebar"
-        >
-          {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
-        </button>
-        {activeTab === "dashboard" && renderDashboard()}
-        {activeTab === "recap" && renderDailyRecap()}
-        {activeTab === "calendar" && (
-          <CalendarView
-            trades={trades}
-            setTrades={setTrades}
-            setSelectedTrade={setSelectedTrade}
-            viewMonth={calendarViewMonth}
-            setViewMonth={setCalendarViewMonth}
-            viewYear={calendarViewYear}
-            selectedDate={calendarSelectedDate}
-            setSelectedDate={setCalendarSelectedDate}
-          />
-        )}
-        {activeTab === "discipline" && <DisciplineView />}
-        {activeTab === "strategy" && renderStrategy()}
-      </main>
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        {renderMobileNav()}
+        <main className="flex-1 min-h-0 p-4 pt-14 sm:p-6 sm:pt-14 md:p-8 md:pt-8 lg:p-12 lg:pt-12 overflow-y-auto relative">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="hidden md:block absolute top-3 left-3 z-10 p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors shrink-0 bg-white/30 backdrop-blur-sm"
+            title="Toggle Sidebar"
+          >
+            {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
+          </button>
+          {activeTab === "dashboard" && renderDashboard()}
+          {activeTab === "recap" && renderDailyRecap()}
+          {activeTab === "calendar" && (
+            <CalendarView
+              trades={trades}
+              setTrades={setTrades}
+              setSelectedTrade={setSelectedTrade}
+              viewMonth={calendarViewMonth}
+              setViewMonth={setCalendarViewMonth}
+              viewYear={calendarViewYear}
+              selectedDate={calendarSelectedDate}
+              setSelectedDate={setCalendarSelectedDate}
+              isMobile={isMobile}
+            />
+          )}
+          {activeTab === "discipline" && <DisciplineView />}
+          {activeTab === "strategy" && renderStrategy()}
+        </main>
+      </div>
       {selectedTrade && (
         <TradeDetailsModal
           trade={selectedTrade}
@@ -2257,7 +2370,7 @@ const AICoachPanel = ({
   };
 
   return (
-    <GlassCard className="flex flex-col h-[800px]">
+    <GlassCard className="flex flex-col h-[800px] max-md:max-h-[70vh] max-md:min-h-[320px]">
       <div className="flex items-center mb-4 pb-4 border-b border-white/50">
         <h3 className="display-font text-3xl text-[#2e2e2e]">Flow Lab</h3>
       </div>
@@ -2499,6 +2612,7 @@ const TradeDetailsModal = ({
   onClose: () => void;
   onSave: (t: Trade) => void;
 }) => {
+  const isMobile = useIsMobile();
   const [notes, setNotes] = useState(trade.notes);
   const [tags, setTags] = useState<string[]>(trade.tags);
   const [modelTag, setModelTag] = useState<string | null>(trade.modelTag ?? null);
@@ -2613,9 +2727,9 @@ const TradeDetailsModal = ({
         >
           <Icons.X />
         </button>
-        <div className="flex items-end justify-between mb-8 pr-12">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 pr-8 sm:pr-12">
           <div>
-            <h2 className="display-font text-4xl text-[#2e2e2e]">{formatSymbolDisplay(trade.instrument)} Trade</h2>
+            <h2 className="display-font text-3xl sm:text-4xl text-[#2e2e2e]">{formatSymbolDisplay(trade.instrument)} Trade</h2>
             <div className="text-sm font-medium text-gray-500 mt-1 space-y-0.5">
               <div className="flex items-center gap-2 flex-wrap">
                 {(() => {
@@ -2665,21 +2779,55 @@ const TradeDetailsModal = ({
             Chart Images
           </span>
         </div>
-        <div
-          className="w-full bg-white/40 rounded-xl mb-6 overflow-hidden relative"
-          style={{ height: TV_CHART_HEIGHT, maxWidth: "100%", minHeight: 0 }}
-        >
-          {chartImages.length > 0 ? (
-            <div className="w-full h-full min-h-0 flex flex-col bg-[#ebebeb]/50 rounded-xl overflow-hidden">
-              <div className="flex-1 min-h-0 overflow-auto p-2 flex gap-3">
-                {chartImages.slice(0, 2).map((src, idx) => (
-                  <div key={idx} className="relative group rounded-lg overflow-hidden bg-black/5 flex-1 min-w-0 w-1/2 aspect-video">
-                    <img
-                      src={src}
-                      alt={`Chart ${idx + 1} for ${formatSymbolDisplay(trade.instrument)}`}
-                      className="absolute inset-0 w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+        {isMobile ? (
+          <div className="mb-6 space-y-2">
+            {chartImages.length === 0 ? (
+              <p className="text-sm text-gray-500">No chart images.</p>
+            ) : null}
+            {chartImages.slice(0, 2).map((_, idx) => (
+              <div key={idx} className="flex items-center justify-between gap-2 py-2 border-b border-white/40 last:border-0">
+                <button
+                  type="button"
+                  onClick={() => { setChartLightboxIndex(idx); setChartLightboxOpen(true); }}
+                  className="text-sm font-medium text-[#98935c] hover:text-[#2e2e2e]"
+                >
+                  View chart {idx + 1}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => removeChartImageAt(e, idx)}
+                  className="text-xs text-gray-500 hover:text-red-600"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {chartImages.length < 2 && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-sm font-medium text-[#98935c] hover:text-[#2e2e2e]"
+              >
+                + Add chart image
+              </button>
+            )}
+          </div>
+        ) : (
+          <div
+            className="w-full bg-white/40 rounded-xl mb-6 overflow-hidden relative"
+            style={{ height: TV_CHART_HEIGHT, maxWidth: "100%", minHeight: 0 }}
+          >
+            {chartImages.length > 0 ? (
+              <div className="w-full h-full min-h-0 flex flex-col bg-[#ebebeb]/50 rounded-xl overflow-hidden">
+                <div className="flex-1 min-h-0 overflow-auto p-2 flex gap-3">
+                  {chartImages.slice(0, 2).map((src, idx) => (
+                    <div key={idx} className="relative group rounded-lg overflow-hidden bg-black/5 flex-1 min-w-0 w-1/2 aspect-video">
+                      <img
+                        src={src}
+                        alt={`Chart ${idx + 1} for ${formatSymbolDisplay(trade.instrument)}`}
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
                         <button
                           type="button"
                           onClick={() => { setChartLightboxIndex(idx); setChartLightboxOpen(true); }}
@@ -2694,47 +2842,48 @@ const TradeDetailsModal = ({
                         >
                           Remove
                         </button>
+                      </div>
                     </div>
-                  </div>
                   ))}
-              </div>
-              {chartImages.length < 2 && (
-                <div className="p-2 border-t border-white/40">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-[10px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e]"
-                  >
-                    + Add more images
-                  </button>
                 </div>
-              )}
-            </div>
-          ) : (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => fileInputRef.current?.click()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              className={`w-full h-full min-h-[300px] flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
-                isDragging ? "border-[#98935c] bg-white/40" : "border-gray-300 bg-white/20 hover:border-gray-400 hover:bg-white/30"
-              }`}
-            >
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
-                Drop chart images or click to upload
-              </span>
-              <span className="text-[10px] text-gray-400">JPEG, PNG, GIF, WebP — multiple allowed</span>
-            </div>
-          )}
-        </div>
+                {chartImages.length < 2 && (
+                  <div className="p-2 border-t border-white/40">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-[10px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e]"
+                    >
+                      + Add more images
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                className={`w-full h-full min-h-[300px] flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${
+                  isDragging ? "border-[#98935c] bg-white/40" : "border-gray-300 bg-white/20 hover:border-gray-400 hover:bg-white/30"
+                }`}
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                  Drop chart images or click to upload
+                </span>
+                <span className="text-[10px] text-gray-400">JPEG, PNG, GIF, WebP — multiple allowed</span>
+              </div>
+            )}
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
