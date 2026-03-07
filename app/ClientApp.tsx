@@ -225,6 +225,7 @@ const generateMockTrades = () => {
 
 // --- LOCAL STORAGE PERSISTENCE (Option 1: client-only) ---
 const TRADES_STORAGE_KEY = "flowstate-trades";
+const USER_HAS_IMPORTED_KEY = "flowstate-has-user-imported";
 
 function loadTradesFromStorage(): ReturnType<typeof generateMockTrades> | null {
   if (typeof window === "undefined") return null;
@@ -1035,42 +1036,62 @@ export default function ClientApp() {
         parsedTrades.sort((a, b) => a.entryTime - b.entryTime);
         const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 })); // capital recomputed below after merge
 
-        setTrades((prevTrades) => {
-          const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
-            `${t.instrument}|${t.entryTime}|${t.exitTime}`;
-          const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
-          const kept = prevTrades.filter(
-            (t) => !t.tags?.includes("Tradovate Import") || isCombined(t)
-          );
-          const existingTradovate = prevTrades.filter(
-            (t) => t.tags?.includes("Tradovate Import") && !isCombined(t)
-          );
-          const keysConsumedByCombined = new Set<string>(
-            kept.flatMap((t) => (isCombined(t) && t.combinedFromKeys ? t.combinedFromKeys : []))
-          );
-          const tradovateMap = new Map<string, (typeof parsedWithCapital)[0]>();
-          for (const t of existingTradovate) {
-            tradovateMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
-          }
-          for (const t of parsedWithCapital) {
-            const key = tradeKeyForMerge(t);
-            if (keysConsumedByCombined.has(key)) continue;
-            tradovateMap.set(key, { ...t });
-          }
-          const mergedTradovate = Array.from(tradovateMap.values());
-          const combined = [...kept, ...mergedTradovate].sort((a, b) => a.entryTime - b.entryTime);
+        const isFirstImport = typeof window !== "undefined" && !localStorage.getItem(USER_HAS_IMPORTED_KEY);
 
+        if (isFirstImport) {
+          // First time user imports: replace pre-populated/mock data with imported data only
           let runningCapital = 50000;
-          const withCapital = combined.map((t) => {
+          const withCapital = parsedWithCapital.map((t) => {
             runningCapital += t.pnl;
             return { ...t, capitalAfter: runningCapital };
           });
+          setTrades(withCapital.reverse() as ReturnType<typeof generateMockTrades>);
+          try {
+            localStorage.setItem(USER_HAS_IMPORTED_KEY, "1");
+          } catch {
+            // ignore
+          }
+          const addedCount = parsedTrades.length;
+          setImportStatus(`Successfully imported ${addedCount} trade(s). Pre-populated data cleared.`);
+        } else {
+          // User has imported before: merge with existing data (do not clear previous user data)
+          setTrades((prevTrades) => {
+            const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
+              `${t.instrument}|${t.entryTime}|${t.exitTime}`;
+            const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
+            const kept = prevTrades.filter(
+              (t) => !t.tags?.includes("Tradovate Import") || isCombined(t)
+            );
+            const existingTradovate = prevTrades.filter(
+              (t) => t.tags?.includes("Tradovate Import") && !isCombined(t)
+            );
+            const keysConsumedByCombined = new Set<string>(
+              kept.flatMap((t) => (isCombined(t) && t.combinedFromKeys ? t.combinedFromKeys : []))
+            );
+            const tradovateMap = new Map<string, (typeof parsedWithCapital)[0]>();
+            for (const t of existingTradovate) {
+              tradovateMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
+            }
+            for (const t of parsedWithCapital) {
+              const key = tradeKeyForMerge(t);
+              if (keysConsumedByCombined.has(key)) continue;
+              tradovateMap.set(key, { ...t });
+            }
+            const mergedTradovate = Array.from(tradovateMap.values());
+            const combined = [...kept, ...mergedTradovate].sort((a, b) => a.entryTime - b.entryTime);
 
-          return withCapital.reverse() as ReturnType<typeof generateMockTrades>;
-        });
+            let runningCapital = 50000;
+            const withCapital = combined.map((t) => {
+              runningCapital += t.pnl;
+              return { ...t, capitalAfter: runningCapital };
+            });
 
-        const addedCount = parsedTrades.length;
-        setImportStatus(`Successfully imported ${addedCount} trade(s). Previous data kept and merged.`);
+            return withCapital.reverse() as ReturnType<typeof generateMockTrades>;
+          });
+
+          const addedCount = parsedTrades.length;
+          setImportStatus(`Successfully imported ${addedCount} trade(s). Previous data kept and merged.`);
+        }
         setTimeout(() => setImportStatus(""), 4000);
       } catch (err) {
         setImportStatus(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -1644,6 +1665,25 @@ export default function ClientApp() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      <p className="text-center pt-4">
+        <button
+          type="button"
+          onClick={() => {
+            setTrades([]);
+            setSelectedTrade(null);
+            try {
+              localStorage.removeItem(TRADES_STORAGE_KEY);
+              localStorage.removeItem(USER_HAS_IMPORTED_KEY);
+            } catch {
+              // ignore
+            }
+          }}
+          className="text-xs text-gray-400 dark:text-[#71717a] hover:text-gray-600 dark:hover:text-[#a1a1aa] underline underline-offset-2"
+        >
+          Clear all data (testing)
+        </button>
+      </p>
     </div>
   );
 
