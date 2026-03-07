@@ -1,9 +1,19 @@
 @import "tailwindcss";
 
+/* Class-based dark mode (toggle sets .dark on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ebebeb;
   --foreground: #2e2e2e;
   --color-gray-500: #6b7280;
+}
+
+/* Option B – Neutral dark */
+.dark {
+  --background: #18181b;
+  --foreground: #fafafa;
+  --color-gray-500: #a1a1aa;
 }
 
 @theme inline {
@@ -50,4 +60,11 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.2);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }

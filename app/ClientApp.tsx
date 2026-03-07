@@ -28,6 +28,8 @@ import {
   Trash2 as LucideTrash2,
   Merge as LucideMerge,
   Menu as LucideMenu,
+  Sun as LucideSun,
+  Moon as LucideMoon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -310,7 +312,7 @@ const GlassCard = ({
 }) => (
   <div
     onClick={onClick}
-    className={`bg-white/40 backdrop-blur-md border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.05)] rounded-2xl p-6 ${className}`}
+    className={`bg-white/40 dark:bg-[#27272a] backdrop-blur-md border border-white/60 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.05)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.2)] rounded-2xl p-6 ${className}`}
   >
     {children}
   </div>
@@ -480,14 +482,14 @@ function CalendarView({
       >
         <div className={compactCalendar ? "w-full" : ""}>
           <h2
-            className={`display-font text-[#2e2e2e] ${compactCalendar ? "text-3xl" : "text-5xl"}`}
+            className={`display-font text-[#2e2e2e] dark:text-[#fafafa] ${compactCalendar ? "text-3xl" : "text-5xl"}`}
           >
             {new Date(viewYear, viewMonth).toLocaleString("default", {
               month: "long",
               year: "numeric",
             })}
           </h2>
-          <div className="text-sm font-medium text-gray-500 mt-2 flex gap-4">
+          <div className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] mt-2 flex gap-4">
             <button
               onClick={() => setViewMonth((prev) => (prev === 0 ? 11 : prev - 1))}
               className="hover:text-black"
@@ -503,7 +505,7 @@ function CalendarView({
           </div>
         </div>
         <div className={compactCalendar ? "w-full text-right" : "text-right"}>
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-2">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-2">
             Monthly PnL
           </div>
           <div
@@ -522,7 +524,7 @@ function CalendarView({
               {(hideWeeklyColumn ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Weekly"]).map((d, i) => (
                 <div
                   key={d}
-                  className={`text-center font-semibold text-gray-500 uppercase ${compactCalendar ? "text-[8px] tracking-wide" : "text-[10px] tracking-wider"} ${!hideWeeklyColumn && i === 7 ? "text-[#2e2e2e]" : ""}`}
+                  className={`text-center font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase ${compactCalendar ? "text-[8px] tracking-wide" : "text-[10px] tracking-wider"} ${!hideWeeklyColumn && i === 7 ? "text-[#2e2e2e] dark:text-[#fafafa]" : ""}`}
                 >
                   {!hideWeeklyColumn && compactCalendar && i === 7 ? "Wk" : d}
                 </div>
@@ -551,15 +553,15 @@ function CalendarView({
                         : day && day.trades.length > 0
                           ? (day.pnl ?? 0) > 0
                             ? compactCalendar
-                              ? "!border-2 !border-[#42bda8] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(66,189,168,0.35)]"
-                              : "!border-2 !border-[#42bda8] hover:!border-[#42bda8] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(66,189,168,0.35)]"
+                              ? "!border-2 !border-[#42bda8] hover:bg-white/50 dark:hover:bg-white/10 hover:shadow-[inset_0_0_24px_rgba(66,189,168,0.35)]"
+                              : "!border-2 !border-[#42bda8] hover:!border-[#42bda8] hover:bg-white/50 dark:hover:bg-white/10 hover:shadow-[inset_0_0_24px_rgba(66,189,168,0.35)]"
                             : (day.pnl ?? 0) < 0
                               ? compactCalendar
-                                ? "!border-2 !border-[#f43636] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(244,54,54,0.35)]"
-                                : "!border-2 !border-[#f43636] hover:!border-[#f43636] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(244,54,54,0.35)]"
+                                ? "!border-2 !border-[#f43636] hover:bg-white/50 dark:hover:bg-white/10 hover:shadow-[inset_0_0_24px_rgba(244,54,54,0.35)]"
+                                : "!border-2 !border-[#f43636] hover:!border-[#f43636] hover:bg-white/50 dark:hover:bg-white/10 hover:shadow-[inset_0_0_24px_rgba(244,54,54,0.35)]"
                               : compactCalendar
-                                ? "!border-2 !border-[#98935c] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(152,147,92,0.3)]"
-                                : "!border-2 !border-[#98935c] hover:!border-[#98935c] hover:bg-white/50 hover:shadow-[inset_0_0_24px_rgba(152,147,92,0.3)]"
+                                ? "!border-2 !border-[#98935c] hover:bg-white/50 dark:hover:bg-white/10 hover:shadow-[inset_0_0_24px_rgba(152,147,92,0.3)]"
+                                : "!border-2 !border-[#98935c] hover:!border-[#98935c] hover:bg-white/50 dark:hover:bg-white/10 hover:shadow-[inset_0_0_24px_rgba(152,147,92,0.3)]"
                           : "border-2 border-transparent"}
                     `}
                   >
@@ -574,7 +576,7 @@ function CalendarView({
                           <div className="text-right space-y-0.5 w-full">
                             {day.trades.length > 0 && (
                               <div
-                                className={`text-[10px] font-medium uppercase tracking-wide ${day.fullDate === selectedDate ? "text-white/90" : "text-gray-500"}`}
+                                className={`text-[10px] font-medium uppercase tracking-wide ${day.fullDate === selectedDate ? "text-white/90" : "text-gray-500 dark:text-[#a1a1aa]"}`}
                               >
                                 {day.trades.length} {day.trades.length === 1 ? "trade" : "trades"}
                               </div>
@@ -595,7 +597,7 @@ function CalendarView({
                 ))}
                 {!hideWeeklyColumn && (
                   <div
-                    className={`flex items-center justify-center rounded-xl bg-white/20 font-semibold ${compactCalendar ? "text-xs" : "text-sm"}`}
+                    className={`flex items-center justify-center rounded-xl bg-white/20 dark:bg-white/10 font-semibold ${compactCalendar ? "text-xs" : "text-sm"}`}
                     style={{ color: week.weeklyPnL >= 0 ? COLORS.profit : COLORS.loss }}
                   >
                     {formatPnl(week.weeklyPnL, 0)}
@@ -609,8 +611,8 @@ function CalendarView({
         {selectedDate && (
           <div className="w-full fade-in pb-8">
             <GlassCard>
-              <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-white/50 pb-4">
-                <h3 className="display-font text-3xl text-[#2e2e2e]">
+              <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-white/50 dark:border-[#3f3f46] pb-4">
+                <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">
                   {new Date(selectedDate).toLocaleDateString(undefined, {
                     weekday: "long",
                     month: "long",
@@ -622,22 +624,22 @@ function CalendarView({
                     <button
                       type="button"
                       onClick={handleCombineSelected}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#98935c]/20 text-[#2e2e2e] hover:bg-[#98935c]/30 transition-colors"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#98935c]/20 text-[#2e2e2e] dark:text-[#fafafa] hover:bg-[#98935c]/30 transition-colors"
                     >
                       <LucideMerge className="w-4 h-4" />
                       Combine {selectedForCombine.size} trades
                     </button>
                   )}
-                  <span className="text-sm font-medium text-gray-500">
+                  <span className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa]">
                     {tradesForSelectedDate.length} Trades
                   </span>
                 </div>
               </div>
               {tradesForSelectedDate.length === 0 ? (
-                <p className="text-sm font-light text-gray-500">No trades recorded.</p>
+                <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades recorded.</p>
               ) : (
                 <>
-                  <p className="text-xs text-gray-500 mb-3">
+                  <p className="text-xs text-gray-500 dark:text-[#a1a1aa] mb-3">
                     Select two or more trades (e.g. same position with multiple take-profits) to combine P&amp;L into one.
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -645,7 +647,7 @@ function CalendarView({
                       <div
                         key={t.id}
                         onClick={() => setSelectedTrade(t)}
-                        className={`relative p-4 pl-10 rounded-xl cursor-pointer border transition-colors ${selectedForCombine.has(t.id) ? "border-[#98935c] bg-[#98935c]/10" : "border-transparent hover:bg-white/50"} ${t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
+                        className={`relative p-4 pl-10 rounded-xl cursor-pointer border transition-colors ${selectedForCombine.has(t.id) ? "border-[#98935c] bg-[#98935c]/10" : "border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46]"} ${t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
                       >
                         <button
                           type="button"
@@ -664,7 +666,7 @@ function CalendarView({
                           )}
                         </button>
                         <div className="flex justify-between items-center mb-2">
-                          <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(t.instrument)}</span>
+                          <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(t.instrument)}</span>
                           <span
                             className="font-medium"
                             style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
@@ -672,7 +674,7 @@ function CalendarView({
                             {formatPnl(t.pnl, 2)}
                           </span>
                         </div>
-                        <div className="text-xs font-medium text-gray-500">
+                        <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">
                           {new Date(t.entryTime).toLocaleTimeString()} -{" "}
                           {new Date(t.exitTime).toLocaleTimeString()}
                         </div>
@@ -703,7 +705,18 @@ export default function ClientApp() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isDark, setIsDark] = useState(false);
   const [dashboardScoreTooltipOpen, setDashboardScoreTooltipOpen] = useState(false);
+
+  useEffect(() => {
+    setIsDark(document.documentElement.classList.contains("dark"));
+  }, []);
+  const toggleTheme = () => {
+    document.documentElement.classList.toggle("dark");
+    const nowDark = document.documentElement.classList.contains("dark");
+    localStorage.setItem("theme", nowDark ? "dark" : "light");
+    setIsDark(nowDark);
+  };
   // Empty initial state so server and client render the same (avoids hydration error).
   // Load from localStorage or mock data only after mount in useEffect.
   const [trades, setTrades] = useState<ReturnType<typeof generateMockTrades>>(() => []);
@@ -1185,7 +1198,7 @@ export default function ClientApp() {
 
   const renderSidebar = () => (
     <div
-      className={`hidden md:flex ${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 backdrop-blur-xl border-r border-white/50 flex-col px-4 pb-4 pt-[49px] shrink-0 z-20`}
+      className={`hidden md:flex ${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 dark:bg-[#27272a] backdrop-blur-xl border-r border-white/50 dark:border-[#3f3f46] flex-col px-4 pb-4 pt-[49px] shrink-0 z-20`}
     >
       <div className="flex flex-col gap-4 mb-8 mt-4">
         <div className="w-full relative h-10 min-h-[2.5rem] flex items-center">
@@ -1195,7 +1208,7 @@ export default function ClientApp() {
                 src="/FLOWSTATE.svg"
                 alt="Flowstate"
                 fill
-                className="object-contain object-left"
+                className="object-contain object-left dark:brightness-0 dark:invert"
               />
             </div>
           ) : (
@@ -1204,7 +1217,7 @@ export default function ClientApp() {
                 src="/FLOWSTATE%20Icon.svg"
                 alt="Flowstate"
                 fill
-                className="object-contain"
+                className="object-contain dark:brightness-0 dark:invert"
               />
             </div>
           )}
@@ -1218,7 +1231,7 @@ export default function ClientApp() {
           <button
             key={item.id}
             onClick={() => setActiveTab(item.id)}
-            className={`flex items-center p-3 rounded-xl transition-all ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/40"}`}
+            className={`flex items-center p-3 rounded-xl transition-all ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/40 dark:hover:bg-[#3f3f46]"}`}
           >
             <span style={{ color: activeTab === item.id ? COLORS.accent : "#6b7280" }}>
               <IconComponent size={20} strokeWidth={2} />
@@ -1229,23 +1242,33 @@ export default function ClientApp() {
         })}
       </nav>
 
-      <div className="mt-auto pt-4 relative">
-        <input
-          type="file"
-          accept=".csv"
-          onChange={handleCSVUpload}
-          className="hidden"
-          id="csv-upload-sidebar"
-        />
-        <label
-          htmlFor="csv-upload-sidebar"
-          className={`flex items-center ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium shadow-md hover:shadow-lg w-full`}
-        >
-          <Icons.Upload /> {sidebarOpen && <span className="ml-3 whitespace-nowrap">Import CSV</span>}
-        </label>
+      <div className="mt-auto pt-4 relative flex flex-col gap-2">
+        <div className={`flex items-center gap-2 ${sidebarOpen ? "flex-row" : "flex-col"}`}>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            className="flex items-center justify-center w-11 h-11 shrink-0 rounded-xl bg-[#2e2e2e] text-white hover:bg-black transition-all shadow-md hover:shadow-lg dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]"
+          >
+            {isDark ? <LucideSun size={20} strokeWidth={2} /> : <LucideMoon size={20} strokeWidth={2} />}
+          </button>
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleCSVUpload}
+            className="hidden"
+            id="csv-upload-sidebar"
+          />
+          <label
+            htmlFor="csv-upload-sidebar"
+            className={`flex items-center flex-1 min-w-0 w-full ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium shadow-md hover:shadow-lg dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]`}
+          >
+            <Icons.Upload /> {sidebarOpen && <span className="ml-3 whitespace-nowrap">Import CSV</span>}
+          </label>
+        </div>
         {importStatus && (
           <div
-            className={`absolute bottom-full left-0 w-full mb-2 z-50 bg-white/90 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center`}
+            className={`absolute bottom-full left-0 w-full mb-2 z-50 bg-white/90 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center dark:bg-[#27272a] dark:border-[#3f3f46]`}
           >
             {importStatus}
           </div>
@@ -1256,14 +1279,14 @@ export default function ClientApp() {
 
   const renderMobileNav = () => (
     <>
-      <header className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between h-14 px-4 bg-white/30 backdrop-blur-xl border-b border-white/50 shrink-0">
+      <header className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between h-14 px-4 bg-white/30 dark:bg-[#27272a] backdrop-blur-xl border-b border-white/50 dark:border-[#3f3f46] shrink-0">
         <div className="relative w-8 h-8">
-          <Image src="/FLOWSTATE%20Icon.svg" alt="Flowstate" fill className="object-contain object-left" />
+          <Image src="/FLOWSTATE%20Icon.svg" alt="Flowstate" fill className="object-contain object-left dark:brightness-0 dark:invert" />
         </div>
         <button
           type="button"
           onClick={() => setMobileMenuOpen((o) => !o)}
-          className="p-2 rounded-lg hover:bg-white/50 text-gray-600 aria-pressed:bg-white/50"
+          className="p-2 rounded-lg hover:bg-white/50 dark:hover:bg-[#3f3f46] text-gray-600 dark:text-[#a1a1aa] aria-pressed:bg-white/50 dark:aria-pressed:bg-[#3f3f46]"
           aria-label="Toggle menu"
           aria-expanded={mobileMenuOpen}
         >
@@ -1277,7 +1300,7 @@ export default function ClientApp() {
             aria-hidden
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="fixed top-14 left-0 right-0 z-50 max-h-[calc(100vh-3.5rem)] overflow-y-auto md:hidden bg-white/95 backdrop-blur-xl border-b border-white/60 shadow-lg">
+          <div className="fixed top-14 left-0 right-0 z-50 max-h-[calc(100vh-3.5rem)] overflow-y-auto md:hidden bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border-b border-white/60 dark:border-[#3f3f46] shadow-lg">
             <nav className="flex flex-col p-4 gap-1">
               {NAV_ITEMS.map((item) => {
                 const IconComponent = item.icon;
@@ -1289,7 +1312,7 @@ export default function ClientApp() {
                       setActiveTab(item.id);
                       setMobileMenuOpen(false);
                     }}
-                    className={`flex items-center p-3 rounded-xl transition-all text-left ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/60"}`}
+                    className={`flex items-center p-3 rounded-xl transition-all text-left ${activeTab === item.id ? "bg-[#98935c]/20 shadow-inner" : "hover:bg-white/60 dark:hover:bg-[#3f3f46]"}`}
                   >
                     <span style={{ color: activeTab === item.id ? COLORS.accent : "#6b7280" }}>
                       <IconComponent size={20} strokeWidth={2} />
@@ -1298,22 +1321,32 @@ export default function ClientApp() {
                   </button>
                 );
               })}
-              <div className="pt-4 mt-2 border-t border-white/50 relative">
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleCSVUpload}
-                  className="hidden"
-                  id="csv-upload-mobile"
-                />
-                <label
-                  htmlFor="csv-upload-mobile"
-                  className="flex items-center justify-start px-4 py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium w-full"
-                >
-                  <Icons.Upload /> <span className="ml-3">Import CSV</span>
-                </label>
+              <div className="pt-4 mt-2 border-t border-white/50 dark:border-[#3f3f46] relative">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                    className="flex items-center justify-center w-11 h-11 shrink-0 rounded-xl bg-[#2e2e2e] text-white hover:bg-black transition-all shadow-md hover:shadow-lg dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]"
+                  >
+                    {isDark ? <LucideSun size={20} strokeWidth={2} /> : <LucideMoon size={20} strokeWidth={2} />}
+                  </button>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCSVUpload}
+                    className="hidden"
+                    id="csv-upload-mobile"
+                  />
+                  <label
+                    htmlFor="csv-upload-mobile"
+                    className="flex items-center flex-1 min-w-0 justify-start px-4 py-3 bg-[#2e2e2e] dark:bg-[#3f3f46] text-white dark:text-[#fafafa] rounded-xl cursor-pointer hover:bg-black dark:hover:bg-[#52525b] transition-all text-sm font-medium w-full"
+                  >
+                    <Icons.Upload /> <span className="ml-3">Import CSV</span>
+                  </label>
+                </div>
                 {importStatus && (
-                  <div className="absolute bottom-full left-4 right-4 mb-2 z-10 bg-white/95 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center">
+                  <div className="absolute bottom-full left-4 right-4 mb-2 z-10 bg-white/95 dark:bg-[#27272a] backdrop-blur-md shadow-lg border border-white/60 dark:border-[#3f3f46] rounded-lg p-2 text-xs text-center">
                     {importStatus}
                   </div>
                 )}
@@ -1328,15 +1361,15 @@ export default function ClientApp() {
   const renderDashboard = () => (
     <div className="space-y-10 fade-in pb-12">
       <div className="mb-4">
-        <h2 className="display-font text-4xl md:text-6xl text-[#2e2e2e] tracking-tight">Dashboard</h2>
-        <p className="text-sm text-gray-500 italic mt-4 border-l-2 border-[#98935c] pl-4 font-light">
+        <h2 className="display-font text-4xl md:text-6xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight">Dashboard</h2>
+        <p className="text-sm text-gray-500 dark:text-[#a1a1aa] italic mt-4 border-l-2 border-[#98935c] pl-4 font-light">
           &quot;{quote}&quot; <span className="font-semibold">— Mark Douglas</span>
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div
-          className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40"
+          className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]"
           onMouseEnter={() => !isMobile && setDashboardScoreTooltipOpen(true)}
           onMouseLeave={() => !isMobile && setDashboardScoreTooltipOpen(false)}
           onClick={() => isMobile && setDashboardScoreTooltipOpen((o) => !o)}
@@ -1344,13 +1377,13 @@ export default function ClientApp() {
           tabIndex={isMobile ? 0 : undefined}
           onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardScoreTooltipOpen((o) => !o); } } : undefined}
         >
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Trader Score
             {isMobile && (
               <span className="ml-1.5 text-gray-400 font-normal">(tap for breakdown)</span>
             )}
           </div>
-          <div className="display-font text-7xl text-[#2e2e2e] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
+          <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {(metrics?.score ?? 0).toFixed(1)}
           </div>
           {metrics?.trends?.hasPrevData && (
@@ -1363,29 +1396,29 @@ export default function ClientApp() {
             </div>
           )}
           <div
-            className={`absolute top-[105%] left-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 z-50 transition-all duration-200 ${
+            className={`absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 z-50 transition-all duration-200 ${
               dashboardScoreTooltipOpen ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
             }`}
           >
-            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-3 border-b border-gray-200 pb-2">
+            <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Score Breakdown
             </h4>
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-xs font-medium text-gray-500">Profit Factor (Max 40)</span>
-                <span className="text-sm font-semibold text-[#2e2e2e]">
+                <span className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">Profit Factor (Max 40)</span>
+                <span className="text-sm font-semibold text-[#2e2e2e] dark:text-[#fafafa]">
                   {(metrics?.components.pfComponent ?? 0).toFixed(1)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs font-medium text-gray-500">Discipline (Max 40)</span>
-                <span className="text-sm font-semibold text-[#2e2e2e]">
+                <span className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">Discipline (Max 40)</span>
+                <span className="text-sm font-semibold text-[#2e2e2e] dark:text-[#fafafa]">
                   {(metrics?.components.discComponent ?? 0).toFixed(1)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs font-medium text-gray-500">Base Buffer</span>
-                <span className="text-sm font-semibold text-[#2e2e2e]">
+                <span className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">Base Buffer</span>
+                <span className="text-sm font-semibold text-[#2e2e2e] dark:text-[#fafafa]">
                   {(metrics?.components.baseBuffer ?? 0).toFixed(1)}
                 </span>
               </div>
@@ -1393,11 +1426,11 @@ export default function ClientApp() {
           </div>
         </div>
 
-        <div className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40">
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
+        <div className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Profit Factor
           </div>
-          <div className="display-font text-7xl text-[#2e2e2e] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
+          <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {(metrics?.profitFactor ?? 0).toFixed(2)}
           </div>
           {metrics?.trends?.hasPrevData && (
@@ -1411,13 +1444,13 @@ export default function ClientApp() {
               {Math.abs(metrics.trends?.profitFactor ?? 0).toFixed(2)} VS PRIOR 30D
             </div>
           )}
-          <div className="absolute top-[105%] left-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
-            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-3 border-b border-gray-200 pb-2">
+          <div className="absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+            <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Calculation
             </h4>
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-[#2e2e2e]">Gross Profit ÷ Gross Loss</p>
-              <p className="text-[11px] font-light text-gray-500 leading-relaxed">
+              <p className="text-xs font-semibold text-[#2e2e2e] dark:text-[#fafafa]">Gross Profit ÷ Gross Loss</p>
+              <p className="text-[11px] font-light text-gray-500 dark:text-[#a1a1aa] leading-relaxed">
                 Values greater than 1.0 indicate profitability. A factor above 2.0 is considered
                 exceptional institutional performance.
               </p>
@@ -1425,11 +1458,11 @@ export default function ClientApp() {
           </div>
         </div>
 
-        <div className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40">
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
+        <div className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Discipline Index
           </div>
-          <div className="display-font text-7xl text-[#2e2e2e] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
+          <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {(metrics?.disciplineScore ?? 0).toFixed(0)}%
           </div>
           {metrics?.trends?.hasPrevData && (
@@ -1443,13 +1476,13 @@ export default function ClientApp() {
               {Math.abs(metrics.trends?.disciplineScore ?? 0).toFixed(0)}% VS PRIOR 30D
             </div>
           )}
-          <div className="absolute top-[105%] left-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
-            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-3 border-b border-gray-200 pb-2">
+          <div className="absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+            <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Measurement
             </h4>
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-[#2e2e2e]">Three equal factors (⅓ each)</p>
-              <p className="text-[11px] font-light text-gray-500 leading-relaxed">
+              <p className="text-xs font-semibold text-[#2e2e2e] dark:text-[#fafafa]">Three equal factors (⅓ each)</p>
+              <p className="text-[11px] font-light text-gray-500 dark:text-[#a1a1aa] leading-relaxed">
                 <strong>Risk consistency:</strong> Losses in a tight range (low variance) score higher. &nbsp;
                 <strong>Journaling:</strong> Notes, tags, and chart images per trade add to the score. &nbsp;
                 <strong>Strength:</strong> Higher trade strength ratings (1–5) across trades improve discipline.
@@ -1458,20 +1491,20 @@ export default function ClientApp() {
           </div>
         </div>
 
-        <div className="flex flex-col p-6 bg-white/30 rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40">
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
+        <div className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Win / Loss Ratio
           </div>
-          <div className="display-font text-7xl text-[#2e2e2e] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
+          <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {metrics ? `${(metrics.winLossRatio as number).toFixed(0)}%` : "--"}
           </div>
-          <div className="absolute top-[105%] right-0 w-64 bg-white/95 backdrop-blur-xl border border-white/80 shadow-[0_8px_32px_rgba(0,0,0,0.08)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
-            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-3 border-b border-gray-200 pb-2">
+          <div className="absolute top-[105%] right-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+            <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Measurement
             </h4>
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-[#2e2e2e]">% of Trades That Were Wins</p>
-              <p className="text-[11px] font-light text-gray-500 leading-relaxed">
+              <p className="text-xs font-semibold text-[#2e2e2e] dark:text-[#fafafa]">% of Trades That Were Wins</p>
+              <p className="text-[11px] font-light text-gray-500 dark:text-[#a1a1aa] leading-relaxed">
                 Win count ÷ total trades, as a percentage. Example: 6 wins and 4 losses out of 10
                 trades = 60% win/loss ratio.
               </p>
@@ -1483,16 +1516,16 @@ export default function ClientApp() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div
           onClick={() => metrics?.bestTrade && setSelectedTrade(metrics.bestTrade)}
-          className="flex flex-col p-6 bg-white/30 rounded-[2rem] cursor-pointer hover:bg-white/50 transition-colors border border-transparent hover:border-[#42bda8]/30"
+          className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] cursor-pointer hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors border border-transparent hover:border-[#42bda8]/30"
         >
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Best Trade
           </div>
           {metrics?.bestTrade ? (
             <div className="flex justify-between items-end">
               <div>
-                <div className="text-lg font-semibold text-[#2e2e2e]">{formatSymbolDisplay(metrics.bestTrade.instrument)}</div>
-                <div className="text-xs font-medium text-gray-500 mt-1">
+                <div className="text-lg font-semibold text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(metrics.bestTrade.instrument)}</div>
+                <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa] mt-1">
                   {new Date(metrics.bestTrade.entryTime).toLocaleDateString()}
                 </div>
               </div>
@@ -1501,24 +1534,24 @@ export default function ClientApp() {
               </div>
             </div>
           ) : (
-            <div className="text-sm font-light text-gray-500">No data</div>
+            <div className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No data</div>
           )}
         </div>
 
         <div
           onClick={() => metrics?.worstTrade && setSelectedTrade(metrics.worstTrade)}
-          className="flex flex-col p-6 bg-white/30 rounded-[2rem] cursor-pointer hover:bg-white/50 transition-colors border border-transparent hover:border-[#f43636]/30"
+          className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] cursor-pointer hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors border border-transparent hover:border-[#f43636]/30"
         >
-          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.2em] mb-3">
+          <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Worst Trade
           </div>
           {metrics?.worstTrade ? (
             <div className="flex justify-between items-end">
               <div>
-                <div className="text-lg font-semibold text-[#2e2e2e]">
+                <div className="text-lg font-semibold text-[#2e2e2e] dark:text-[#fafafa]">
                   {formatSymbolDisplay(metrics.worstTrade.instrument)}
                 </div>
-                <div className="text-xs font-medium text-gray-500 mt-1">
+                <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa] mt-1">
                   {new Date(metrics.worstTrade.entryTime).toLocaleDateString()}
                 </div>
               </div>
@@ -1527,15 +1560,15 @@ export default function ClientApp() {
               </div>
             </div>
           ) : (
-            <div className="text-sm font-light text-gray-500">No data</div>
+            <div className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No data</div>
           )}
         </div>
       </div>
 
-      <div className="h-[450px] w-full p-8 bg-white/30 rounded-[2rem] relative flex flex-col">
+      <div className="h-[450px] w-full p-8 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative flex flex-col">
         <div className="flex flex-col sm:flex-row justify-between items-start mb-2 gap-4">
           <div>
-            <h3 className="display-font text-3xl text-[#2e2e2e]">Net Profit</h3>
+            <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">Net Profit</h3>
             <div
               className="display-font text-5xl mt-1 tracking-tight"
               style={{ color: filteredChartData.isPositive ? COLORS.profit : COLORS.loss }}
@@ -1543,12 +1576,12 @@ export default function ClientApp() {
               {formatPnl(filteredChartData.currentNet, 2)}
             </div>
           </div>
-          <div className="flex gap-1 bg-white/50 p-1 rounded-xl border border-white/60">
+          <div className="flex gap-1 bg-white/50 dark:bg-[#3f3f46] p-1 rounded-xl border border-white/60 dark:border-[#3f3f46]">
             {["1W", "1M", "3M", "YTD", "ALL"].map((tf) => (
               <button
                 key={tf}
                 onClick={() => setChartTimeframe(tf)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${chartTimeframe === tf ? "bg-[#2e2e2e] text-white shadow-sm" : "text-gray-500 hover:text-[#2e2e2e]"}`}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${chartTimeframe === tf ? "bg-[#2e2e2e] dark:bg-[#3f3f46] text-white dark:text-[#fafafa] shadow-sm" : "text-gray-500 dark:text-[#a1a1aa] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"}`}
               >
                 {tf}
               </button>
@@ -1588,6 +1621,7 @@ export default function ClientApp() {
                   border: "1px solid rgba(255,255,255,0.6)",
                   boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
                 }}
+                labelStyle={{ color: "#2e2e2e", fontFamily: "Inter" }}
                 labelFormatter={(l) => new Date(l).toLocaleString()}
                 formatter={(value: number) => [`$${value.toFixed(2)}`, "Net Profit"]}
                 itemStyle={{ color: COLORS.text, fontWeight: 600, fontFamily: "Inter" }}
@@ -1620,20 +1654,20 @@ export default function ClientApp() {
     return (
       <div className="flex flex-col gap-8 fade-in">
         <div className="space-y-6">
-          <h2 className="display-font text-5xl mb-6 text-[#2e2e2e]">Daily Recap</h2>
+          <h2 className="display-font text-5xl mb-6 text-[#2e2e2e] dark:text-[#fafafa]">Daily Recap</h2>
           {todaysTrades.length === 0 ? (
             <GlassCard>
-              <p className="text-sm font-light text-gray-500">No trades recorded today.</p>
+              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades recorded today.</p>
             </GlassCard>
           ) : (
             todaysTrades.map((trade) => (
               <GlassCard
                 key={trade.id}
-                className={`cursor-pointer border border-transparent hover:bg-white/50 transition-colors ${trade.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
+                className={`cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${trade.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
                 onClick={() => setSelectedTrade(trade)}
               >
                 <div className="flex justify-between items-center mb-4">
-                  <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(trade.instrument)}</span>
+                  <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(trade.instrument)}</span>
                   <span
                     className="font-medium"
                     style={{ color: trade.pnl >= 0 ? COLORS.profit : COLORS.loss }}
@@ -1641,7 +1675,7 @@ export default function ClientApp() {
                     {formatPnl(trade.pnl, 2)}
                   </span>
                 </div>
-                <div className="text-sm font-medium text-gray-500 mb-4">
+                <div className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] mb-4">
                   {new Date(trade.entryTime).toLocaleTimeString()} -{" "}
                   {new Date(trade.exitTime).toLocaleTimeString()}
                 </div>
@@ -1649,14 +1683,14 @@ export default function ClientApp() {
                   {trade.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="px-3 py-1 bg-white/50 rounded-full text-xs font-medium border border-gray-200 text-[#2e2e2e]"
+                      className="px-3 py-1 bg-white/50 dark:bg-[#a1a1aa] rounded-full text-xs font-medium border border-gray-200 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa]"
                     >
                       {tag}
                     </span>
                   ))}
                 </div>
-                <div className="mt-4 pt-4 border-t border-white/50 flex items-center gap-4">
-                  <span className="text-xs font-medium uppercase tracking-widest text-gray-500">
+                <div className="mt-4 pt-4 border-t border-white/50 dark:border-[#3f3f46] flex items-center gap-4">
+                  <span className="text-xs font-medium uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa]">
                     Trade Strength:
                   </span>
                   <StrengthMeter
@@ -1737,17 +1771,17 @@ export default function ClientApp() {
 
     return (
       <div className="fade-in space-y-6">
-        <h2 className="display-font text-5xl text-[#2e2e2e]">Discipline</h2>
-        <p className="text-sm font-light text-gray-500 max-w-xl">
+        <h2 className="display-font text-5xl text-[#2e2e2e] dark:text-[#fafafa]">Discipline</h2>
+        <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-xl">
           Filter by tag or model to review trades and work through discipline problems. Use Flow Lab to discuss the filtered set and attach notes.
         </p>
 
         {/* Tags (per-trade tags) */}
         <div className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">Tags</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Tags</span>
           <div className="flex flex-wrap gap-3 items-center">
             {sortedTags.length === 0 ? (
-              <span className="text-sm font-light text-gray-500">No tags yet. Add tags to trades in trade details.</span>
+              <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No tags yet. Add tags to trades in trade details.</span>
             ) : (
               sortedTags.map(([tag, count]) => {
                 const isSelected = selectedTag === tag;
@@ -1763,12 +1797,12 @@ export default function ClientApp() {
                     className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
                       isSelected
                         ? "bg-[#2e2e2e] text-white border-[#2e2e2e] font-semibold"
-                        : "bg-white/40 border-white/60 text-[#2e2e2e] hover:bg-white/60 hover:border-[#98935c]/50 " +
+                        : "bg-white/40 dark:bg-[#27272a] border-white/60 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/60 dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50 " +
                           (isHighCount ? "font-semibold" : "font-medium")
                     }`}
                   >
                     {tag}
-                    <span className="ml-1.5 text-gray-500 font-normal">({count})</span>
+                    <span className="ml-1.5 text-gray-500 dark:text-[#a1a1aa] font-normal">({count})</span>
                   </button>
                 );
               })
@@ -1778,10 +1812,10 @@ export default function ClientApp() {
 
         {/* Models (model tag from Models page) */}
         <div className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">Models</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Models</span>
           <div className="flex flex-wrap gap-3 items-center">
             {sortedModelTags.length === 0 ? (
-              <span className="text-sm font-light text-gray-500">No model tags yet. Assign a model in trade details.</span>
+              <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No model tags yet. Assign a model in trade details.</span>
             ) : (
               sortedModelTags.map(([modelName, count]) => {
                 const isSelected = selectedModelTag === modelName;
@@ -1797,12 +1831,12 @@ export default function ClientApp() {
                     className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
                       isSelected
                         ? "bg-[#98935c] text-white border-[#98935c] font-semibold"
-                        : "bg-white/40 border-white/60 text-[#2e2e2e] hover:bg-white/60 hover:border-[#98935c]/50 " +
+                        : "bg-white/40 dark:bg-[#27272a] border-white/60 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/60 dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50 " +
                           (isHighCount ? "font-semibold" : "font-medium")
                     }`}
                   >
                     {modelName}
-                    <span className={`ml-1.5 font-normal ${isSelected ? "text-white/80" : "text-gray-500"}`}>({count})</span>
+                    <span className={`ml-1.5 font-normal ${isSelected ? "text-white/80" : "text-gray-500 dark:text-[#a1a1aa]"}`}>({count})</span>
                   </button>
                 );
               })
@@ -1817,7 +1851,7 @@ export default function ClientApp() {
               <>
                 {/* Discipline notes for this tag or model */}
                 <GlassCard>
-                  <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                  <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                     Discipline notes — {selectedModelTag ? `Model: ${selectedModelTag}` : selectedTag}
                   </label>
                   <textarea
@@ -1826,34 +1860,34 @@ export default function ClientApp() {
                       setDisciplineNotes((prev) => ({ ...prev, [notesKey]: e.target.value }))
                     }
                     placeholder="Reflections and actions for this tag. Use Flow Lab to push AI insights here."
-                    className="w-full min-h-[120px] bg-white/50 border border-white/60 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-sm font-light leading-relaxed text-[#2e2e2e]"
+                    className="w-full min-h-[120px] bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa]"
                   />
                 </GlassCard>
 
                 {/* Filtered trade list */}
                 <GlassCard>
-                  <div className="flex justify-between items-end mb-4 pb-4 border-b border-white/50">
-                    <h3 className="display-font text-2xl text-[#2e2e2e]">
+                  <div className="flex justify-between items-end mb-4 pb-4 border-b border-white/50 dark:border-[#3f3f46]">
+                    <h3 className="display-font text-2xl text-[#2e2e2e] dark:text-[#fafafa]">
                       Trades {selectedModelTag ? `model: "${selectedModelTag}"` : `tagged "${selectedTag}"`}
                     </h3>
-                    <span className="text-sm font-medium text-gray-500">
+                    <span className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa]">
                       {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"}
                     </span>
                   </div>
                   {filteredTrades.length === 0 ? (
-                    <p className="text-sm font-light text-gray-500">No trades with this tag.</p>
+                    <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades with this tag.</p>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[400px] overflow-y-auto">
                       {filteredTrades.map((t) => (
                         <div
                           key={t.id}
                           onClick={() => setSelectedTrade(t)}
-                          className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 transition-colors ${
+                          className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${
                             t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"
                           }`}
                         >
                           <div className="flex justify-between items-center mb-2">
-                            <span className="font-semibold text-lg text-[#2e2e2e]">{formatSymbolDisplay(t.instrument)}</span>
+                            <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(t.instrument)}</span>
                             <span
                               className="font-medium"
                               style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
@@ -1861,7 +1895,7 @@ export default function ClientApp() {
                               {formatPnl(t.pnl, 2)}
                             </span>
                           </div>
-                          <div className="text-xs font-medium text-gray-500">
+                          <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">
                             {new Date(t.entryTime).toLocaleTimeString()} — {new Date(t.exitTime).toLocaleTimeString()}
                           </div>
                         </div>
@@ -1872,7 +1906,7 @@ export default function ClientApp() {
               </>
             ) : (
               <GlassCard className="flex items-center justify-center min-h-[200px]">
-                <p className="text-sm font-light text-gray-500">Select a tag or model above to view trades and discipline notes.</p>
+                <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">Select a tag or model above to view trades and discipline notes.</p>
               </GlassCard>
             )}
           </div>
@@ -1898,8 +1932,8 @@ export default function ClientApp() {
   const renderStrategy = () => (
     <div className="fade-in space-y-8 max-w-4xl">
       <div>
-        <h2 className="display-font text-5xl mb-2 text-[#2e2e2e]">Models</h2>
-        <p className="text-sm font-light text-gray-500 max-w-2xl">
+        <h2 className="display-font text-5xl mb-2 text-[#2e2e2e] dark:text-[#fafafa]">Models</h2>
+        <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-2xl">
           Build a card-based playbook for each model. Tap a model card to reveal an interactive
           checklist you can run in real time during execution.
         </p>
@@ -1915,11 +1949,11 @@ export default function ClientApp() {
           }}
           className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 border-dashed transition-colors px-3 text-center ${
             expandedModelId === "new"
-              ? "bg-white/80 border-[#98935c] text-[#2e2e2e]"
-              : "border-gray-300 bg-white/40 text-[#2e2e2e] hover:border-[#98935c] hover:bg-white/70"
+              ? "bg-white/80 dark:bg-[#27272a] border-[#98935c] text-[#2e2e2e] dark:text-[#fafafa]"
+              : "border-gray-300 dark:border-[#3f3f46] bg-white/40 dark:bg-[#27272a] text-[#2e2e2e] dark:text-[#fafafa] hover:border-[#98935c] hover:bg-white/70 dark:hover:bg-[#3f3f46]"
           }`}
         >
-          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0 shrink-0">
+          <div className="w-8 h-8 rounded-full border border-[#2e2e2e] dark:border-[#a1a1aa] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0 shrink-0">
             +
           </div>
           <span className="block w-full text-sm font-semibold text-center">Add Model</span>
@@ -1936,12 +1970,12 @@ export default function ClientApp() {
               className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 transition-colors px-3 text-center ${
                 isActive
                   ? "bg-[#98935c] border-[#98935c] text-white shadow-inner"
-                  : "bg-white/60 border-transparent text-[#2e2e2e] hover:border-[#98935c]/50"
+                  : "bg-white/60 dark:bg-[#27272a] border-transparent text-[#2e2e2e] dark:text-[#fafafa] hover:border-[#98935c]/50"
               }`}
             >
               <div
                 className={`w-10 h-10 rounded-full border flex items-center justify-center mb-3 flex-shrink-0 shrink-0 ${
-                  isActive ? "border-white/80" : "border-[#2e2e2e]"
+                  isActive ? "border-white/80 dark:border-[#3f3f46]" : "border-[#2e2e2e] dark:border-[#a1a1aa]"
                 }`}
               >
                 <Icon size={22} strokeWidth={2} className={isActive ? "text-white" : ""} />
@@ -1959,19 +1993,19 @@ export default function ClientApp() {
         <GlassCard className="space-y-6">
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Model Name
               </label>
               <input
                 type="text"
                 value={draftModelName}
                 onChange={(e) => setDraftModelName(e.target.value)}
-                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-medium"
+                className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-medium"
                 placeholder="e.g., London Breakout"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Icon
               </label>
               <div className="flex flex-wrap gap-2">
@@ -1985,7 +2019,7 @@ export default function ClientApp() {
                       className={`flex items-center justify-center rounded-xl border w-9 h-9 transition-colors ${
                         active
                           ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
-                          : "bg-white/50 text-[#2e2e2e] border-white/60 hover:border-[#98935c]"
+                          : "bg-white/50 dark:bg-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] border-white/60 dark:border-[#3f3f46] hover:border-[#98935c]"
                       }`}
                       title={id}
                     >
@@ -1999,35 +2033,35 @@ export default function ClientApp() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-3">
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Context &amp; Setup
               </label>
               <textarea
                 value={draftContext}
                 onChange={(e) => setDraftContext(e.target.value)}
-                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-light leading-relaxed min-h-[80px]"
                 placeholder="Market conditions, HTF context, session, structure you require before even thinking about an entry."
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Entry
               </label>
               <textarea
                 value={draftEntry}
                 onChange={(e) => setDraftEntry(e.target.value)}
-                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-light leading-relaxed min-h-[80px]"
                 placeholder="Primary entry signal, candle confirmation, execution pattern."
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Risk
               </label>
               <textarea
                 value={draftRisk}
                 onChange={(e) => setDraftRisk(e.target.value)}
-                className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-light leading-relaxed min-h-[80px]"
                 placeholder="Hard stop rules, max loss per trade, account risk."
               />
             </div>
@@ -2058,7 +2092,7 @@ export default function ClientApp() {
                     className={`text-left px-3 py-2 rounded-xl text-xs font-medium border transition-colors ${
                       enabled
                         ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
-                        : "bg-white/40 text-[#2e2e2e] border-white/60 hover:border-[#98935c]"
+                        : "bg-white/40 dark:bg-[#27272a] text-[#2e2e2e] dark:text-[#fafafa] border-white/60 dark:border-[#3f3f46] hover:border-[#98935c]"
                     }`}
                   >
                     {tpl.label}
@@ -2072,7 +2106,7 @@ export default function ClientApp() {
                 .filter((tpl) => enabledOptionalSections[tpl.id])
                 .map((tpl) => (
                   <div key={tpl.id}>
-                    <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                       {tpl.label}
                     </label>
                     <textarea
@@ -2083,7 +2117,7 @@ export default function ClientApp() {
                           [tpl.id]: e.target.value,
                         }))
                       }
-                      className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                      className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-light leading-relaxed min-h-[80px]"
                       placeholder={tpl.placeholder}
                     />
                   </div>
@@ -2104,7 +2138,7 @@ export default function ClientApp() {
                     { id: `c_${Date.now()}_${prev.length}`, label: "", value: "" },
                   ])
                 }
-                className="text-[11px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e]"
+                className="text-[11px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"
               >
                 + Add custom input
               </button>
@@ -2124,7 +2158,7 @@ export default function ClientApp() {
                             ),
                           )
                         }
-                        className="flex-1 bg-white/50 border border-white/60 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#98935c]"
+                        className="flex-1 bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#98935c]"
                         placeholder="Label (e.g., Trade Management, Add-on rules...)"
                       />
                       <button
@@ -2146,7 +2180,7 @@ export default function ClientApp() {
                           ),
                         )
                       }
-                      className="w-full bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] font-light leading-relaxed min-h-[80px]"
+                      className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-light leading-relaxed min-h-[80px]"
                       placeholder="Checklist style notes for this input."
                     />
                   </div>
@@ -2196,7 +2230,7 @@ export default function ClientApp() {
                       <div className="w-9 h-9 rounded-full border border-[#2e2e2e] flex items-center justify-center">
                         <ModelIcon size={20} />
                       </div>
-                      <h3 className="display-font text-3xl text-[#2e2e2e]">{model.name}</h3>
+                      <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">{model.name}</h3>
                     </div>
                     <p className="text-[11px] text-gray-500 uppercase tracking-[0.2em]">
                       Real-time execution checklist
@@ -2251,7 +2285,7 @@ export default function ClientApp() {
                                 <label
                                   key={key}
                                   className={`flex items-start gap-2 text-xs cursor-pointer ${
-                                    checked ? "text-[#2e2e2e]" : "text-gray-600"
+                                    checked ? "text-[#2e2e2e] dark:text-[#fafafa]" : "text-gray-600 dark:text-[#a1a1aa]"
                                   }`}
                                 >
                                   <input
@@ -2375,12 +2409,12 @@ const AICoachPanel = ({
 
   return (
     <GlassCard className="flex flex-col h-[800px] max-md:max-h-[70vh] max-md:min-h-[320px]">
-      <div className="flex items-center mb-4 pb-4 border-b border-white/50">
-        <h3 className="display-font text-3xl text-[#2e2e2e]">Flow Lab</h3>
+      <div className="flex items-center mb-4 pb-4 border-b border-white/50 dark:border-[#3f3f46]">
+        <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">Flow Lab</h3>
       </div>
       <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
         {chat.length === 0 && (
-          <div className="text-sm font-light text-gray-500 italic">
+          <div className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] italic">
             Initiate sequence. State your psychological hurdle.
           </div>
         )}
@@ -2390,7 +2424,7 @@ const AICoachPanel = ({
             className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
           >
             <div
-              className={`p-3 rounded-2xl max-w-[85%] text-sm leading-relaxed font-light ${msg.role === "user" ? "rounded-br-none" : "bg-white/60 text-[#2e2e2e] rounded-bl-none"}`}
+              className={`p-3 rounded-2xl max-w-[85%] text-sm leading-relaxed font-light ${msg.role === "user" ? "rounded-br-none" : "bg-white/60 dark:bg-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] rounded-bl-none"}`}
               style={msg.role === "user" ? { backgroundColor: COLORS.text, color: "white" } : undefined}
             >
               {msg.content}
@@ -2418,12 +2452,12 @@ const AICoachPanel = ({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          className="flex-1 min-w-0 bg-white/50 border border-white/60 rounded-xl p-3 focus:outline-none text-sm font-medium"
+          className="flex-1 min-w-0 bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa]"
           placeholder="Query the coach..."
         />
         <button
           onClick={handleSend}
-          className="bg-[#2e2e2e] text-white p-3 rounded-xl hover:bg-black transition-colors shrink-0"
+          className="bg-[#2e2e2e] dark:bg-[#3f3f46] text-white dark:text-[#fafafa] p-3 rounded-xl hover:bg-black dark:hover:bg-[#52525b] transition-colors shrink-0"
         >
           <svg
             width="16"
@@ -2735,17 +2769,17 @@ const TradeDetailsModal = ({
   return (
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm fade-in">
-      <GlassCard className="w-full max-w-4xl max-h-[90vh] overflow-y-auto !bg-[#ebebeb]/90 relative">
+      <GlassCard className="w-full max-w-4xl max-h-[90vh] overflow-y-auto !bg-[#ebebeb]/90 dark:!bg-[#27272a] relative">
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 text-gray-500 hover:text-black"
+          className="absolute top-6 right-6 text-gray-500 dark:text-[#a1a1aa] hover:text-black dark:hover:text-[#fafafa]"
         >
           <Icons.X />
         </button>
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-0 pb-3 pr-0">
           <div className="flex flex-col gap-1">
-            <h2 className="display-font text-3xl sm:text-4xl text-[#2e2e2e]">{formatSymbolDisplay(trade.instrument)} Trade</h2>
-            <div className="text-sm font-medium text-gray-500 mt-1 space-y-0.5 flex flex-col gap-1.5 pt-0 pb-0">
+            <h2 className="display-font text-3xl sm:text-4xl text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(trade.instrument)} Trade</h2>
+            <div className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] mt-1 space-y-0.5 flex flex-col gap-1.5 pt-0 pb-0">
               <div className="flex items-center gap-2 flex-wrap">
                 {(() => {
                   const isLong = trade.isLong ?? (trade.entryPrice != null && trade.exitPrice != null ? trade.exitPrice > trade.entryPrice : null);
@@ -2758,7 +2792,7 @@ const TradeDetailsModal = ({
                 {trade.lotSize != null && trade.lotSize > 0 && (() => {
                   const qty = trade.lotSize!;
                   return (
-                    <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-white/60 text-gray-600 border border-white/60">
+                    <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-white/60 dark:bg-[#3f3f46] text-gray-600 dark:text-[#a1a1aa] border border-white/60 dark:border-[#3f3f46]">
                       {qty} {qty === 1 ? "contract" : "contracts"}
                     </span>
                   );
@@ -2787,28 +2821,28 @@ const TradeDetailsModal = ({
         <div className="grid grid-cols-1 md:grid-cols-[minmax(0,0.6fr)_minmax(0,0.4fr)] gap-6 mb-6 items-start">
           <div className="min-w-0">
             <div className="mb-2">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-gray-500 dark:text-[#a1a1aa]">
                 Chart Images
               </span>
             </div>
             {isMobile ? (
               <div className="space-y-2">
                 {chartImages.length === 0 ? (
-                  <p className="text-sm text-gray-500">No chart images.</p>
+                  <p className="text-sm text-gray-500 dark:text-[#a1a1aa]">No chart images.</p>
                 ) : null}
                 {chartImages.slice(0, 2).map((_, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 py-2 border-b border-white/40 last:border-0">
+                  <div key={idx} className="flex items-center justify-between gap-2 py-2 border-b border-white/40 dark:border-[#3f3f46] last:border-0">
                     <button
                       type="button"
                       onClick={() => { setChartLightboxIndex(idx); setChartLightboxOpen(true); }}
-                      className="text-sm font-medium text-[#98935c] hover:text-[#2e2e2e]"
+                      className="text-sm font-medium text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"
                     >
                       View chart {idx + 1}
                     </button>
                     <button
                       type="button"
                       onClick={(e) => removeChartImageAt(e, idx)}
-                      className="text-xs text-gray-500 hover:text-red-600"
+                      className="text-xs text-gray-500 dark:text-[#a1a1aa] hover:text-red-600"
                     >
                       Remove
                     </button>
@@ -2818,7 +2852,7 @@ const TradeDetailsModal = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="text-sm font-medium text-[#98935c] hover:text-[#2e2e2e]"
+                    className="text-sm font-medium text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"
                   >
                     + Add chart image
                   </button>
@@ -2826,11 +2860,11 @@ const TradeDetailsModal = ({
               </div>
             ) : (
               <div
-                className="w-full bg-white/40 rounded-xl overflow-hidden relative"
+                className="w-full bg-white/40 dark:bg-[#3f3f46] rounded-xl overflow-hidden relative"
                 style={{ height: 280, maxWidth: "100%", minHeight: 0 }}
               >
                 {chartImages.length > 0 ? (
-                  <div className="w-full h-full min-h-0 flex flex-col bg-[#ebebeb]/50 rounded-xl overflow-hidden">
+                  <div className="w-full h-full min-h-0 flex flex-col bg-[#ebebeb]/50 dark:bg-[#18181b]/80 rounded-xl overflow-hidden">
                     <div className="flex-1 min-h-0 overflow-auto p-2 flex gap-3">
                       {chartImages.slice(0, 2).map((src, idx) => (
                         <div key={idx} className="relative group rounded-lg overflow-hidden bg-black/5 flex-1 min-w-0 w-1/2 aspect-video">
@@ -2863,7 +2897,7 @@ const TradeDetailsModal = ({
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="text-[10px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e]"
+                          className="text-[10px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"
                         >
                           + Add more images
                         </button>
@@ -2899,7 +2933,7 @@ const TradeDetailsModal = ({
           </div>
           <div className="flex flex-col gap-[49px] min-w-0 h-fit pt-[31px]">
             <div className="h-fit">
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Model
               </label>
               <p className="text-[11px] text-gray-400 mb-2">
@@ -2912,7 +2946,7 @@ const TradeDetailsModal = ({
                   className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors focus:outline-none focus:ring-2 focus:ring-[#98935c] focus:ring-offset-1 ${
                     !modelTag
                       ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
-                      : "bg-white/80 border-gray-200 text-[#2e2e2e] hover:bg-white hover:border-[#98935c]/50"
+                      : "bg-white/80 dark:bg-[#27272a] border-gray-200 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50"
                   }`}
                 >
                   None
@@ -2927,7 +2961,7 @@ const TradeDetailsModal = ({
                       className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-colors focus:outline-none focus:ring-2 focus:ring-[#98935c] focus:ring-offset-1 ${
                         selected
                           ? "bg-[#98935c] text-white border-[#98935c]"
-                          : "bg-white/80 border-gray-200 text-[#2e2e2e] hover:bg-white hover:border-[#98935c]/50"
+                          : "bg-white/80 dark:bg-[#27272a] border-gray-200 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50"
                       }`}
                     >
                       {name}
@@ -2937,14 +2971,14 @@ const TradeDetailsModal = ({
               </div>
             </div>
             <div className="relative min-h-0 h-fit pb-0" ref={tagDropdownRef}>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Tags
               </label>
               <div className="flex flex-wrap gap-2">
                 {tags.map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/80 rounded-full text-xs font-medium border border-gray-200"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/80 rounded-full text-xs font-medium border border-gray-200 text-black"
                   >
                     {tag}
                     <button
@@ -2994,7 +3028,7 @@ const TradeDetailsModal = ({
                         }
                       }}
                       placeholder="Custom tag..."
-                      className="w-full bg-white/50 border border-white/60 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e]"
+                      className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa]"
                     />
                     <button
                       type="button"
@@ -3026,7 +3060,7 @@ const TradeDetailsModal = ({
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="w-full min-h-[120px] max-h-[250px] resize-y bg-white/50 border border-white/60 rounded-xl p-4 focus:outline-none text-sm font-light leading-relaxed text-[#2e2e2e]"
+            className="w-full min-h-[120px] max-h-[250px] resize-y bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-4 focus:outline-none text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa]"
             placeholder="Record emotional state and technical observations..."
             style={{ resize: "vertical" }}
           />
