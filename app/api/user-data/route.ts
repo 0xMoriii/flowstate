@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClientForRouteHandler, setCookiesOnResponse } from "@/lib/supabase/route-handler";
 
 export type UserDataPayload = {
   trades?: unknown[];
@@ -9,8 +9,8 @@ export type UserDataPayload = {
   user_has_imported?: boolean;
 };
 
-export async function GET() {
-  const supabase = await createClient();
+export async function GET(request: Request) {
+  const { supabase, cookiesToSet } = createClientForRouteHandler(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -32,14 +32,16 @@ export async function GET() {
     theme: null,
     user_has_imported: false,
   };
-  return NextResponse.json({
+  const response = NextResponse.json({
     user: { id: user.id, email: user.email ?? undefined },
     ...payload,
   });
+  setCookiesOnResponse(response, cookiesToSet);
+  return response;
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
+  const { supabase, cookiesToSet } = createClientForRouteHandler(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -67,5 +69,7 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true });
+  setCookiesOnResponse(response, cookiesToSet);
+  return response;
 }
