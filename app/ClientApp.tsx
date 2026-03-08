@@ -30,8 +30,11 @@ import {
   Menu as LucideMenu,
   Sun as LucideSun,
   Moon as LucideMoon,
+  LogIn as LucideLogIn,
+  LogOut as LucideLogOut,
   type LucideIcon,
 } from "lucide-react";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 
 /** Model card icon options (id -> Lucide component). Used in Models tab and trade model tag. */
 const MODEL_ICONS: Record<string, LucideIcon> = {
@@ -810,6 +813,10 @@ export default function ClientApp() {
   const [isDark, setIsDark] = useState(false);
   const [dashboardScoreTooltipOpen, setDashboardScoreTooltipOpen] = useState(false);
 
+  // Auth: session user or null; authReady when we've checked session once.
+  const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains("dark"));
   }, []);
@@ -820,7 +827,7 @@ export default function ClientApp() {
     setIsDark(nowDark);
   };
   // Empty initial state so server and client render the same (avoids hydration error).
-  // Load from localStorage or mock data only after mount in useEffect.
+  // Load from API (when signed in) or localStorage only after auth is ready.
   const [trades, setTrades] = useState<ReturnType<typeof generateMockTrades>>(() => []);
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
   const [coachFocusedTrade, setCoachFocusedTrade] = useState<ReturnType<typeof generateMockTrades>[number] | null>(null);
@@ -830,10 +837,60 @@ export default function ClientApp() {
     setQuote(MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]);
   }, []);
 
+  // Supabase auth: init session and subscribe to changes.
   useEffect(() => {
-    const stored = loadTradesFromStorage();
-    setTrades(stored && stored.length > 0 ? stored : generateMockTrades());
+    let mounted = true;
+    const supabase = createSupabaseClient();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (mounted) {
+        setUser(session?.user ? { id: session.user.id, email: session.user.email ?? undefined } : null);
+        setAuthReady(true);
+      }
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) {
+        setUser(session?.user ? { id: session.user.id, email: session.user.email ?? undefined } : null);
+      }
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
+
+  // When auth is ready: load from API (signed in) or localStorage (signed out).
+  const [userDataFetched, setUserDataFetched] = useState(false);
+  useEffect(() => {
+    if (!authReady) return;
+    if (user) {
+      fetch("/api/user-data")
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load"))))
+        .then((data) => {
+          if (Array.isArray(data.trades)) setTrades(data.trades.length > 0 ? data.trades : generateMockTrades());
+          if (data.discipline_notes && typeof data.discipline_notes === "object") setDisciplineNotes(data.discipline_notes);
+          if (Array.isArray(data.models)) setModels(data.models);
+          if (data.theme === "dark" || data.theme === "light") {
+            document.documentElement.classList.toggle("dark", data.theme === "dark");
+            setIsDark(data.theme === "dark");
+          }
+          if (data.user_has_imported && typeof localStorage !== "undefined") {
+            try {
+              localStorage.setItem(USER_HAS_IMPORTED_KEY, "1");
+            } catch {
+              // ignore
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => setUserDataFetched(true));
+    } else {
+      const stored = loadTradesFromStorage();
+      setTrades(stored && stored.length > 0 ? stored : generateMockTrades());
+      setUserDataFetched(true);
+    }
+  }, [authReady, user?.id]);
 
   const [chartTimeframe, setChartTimeframe] = useState("ALL");
 
@@ -950,6 +1007,37 @@ export default function ClientApp() {
   useEffect(() => {
     saveModelsToStorage(models);
   }, [models]);
+
+  // Debounced save to API when signed in (must be after disciplineNotes/models are declared).
+  const saveToApiRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef<string>("");
+  useEffect(() => {
+    if (!user || !userDataFetched) return;
+    const payload = JSON.stringify({
+      trades,
+      discipline_notes: disciplineNotes,
+      models,
+      theme: isDark ? "dark" : "light",
+      user_has_imported: typeof window !== "undefined" && !!localStorage.getItem(USER_HAS_IMPORTED_KEY),
+    });
+    if (payload === lastSavedRef.current) return;
+    if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
+    saveToApiRef.current = setTimeout(() => {
+      saveToApiRef.current = null;
+      fetch("/api/user-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      })
+        .then((res) => {
+          if (res.ok) lastSavedRef.current = payload;
+        })
+        .catch(() => {});
+    }, 1500);
+    return () => {
+      if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
+    };
+  }, [user?.id, userDataFetched, trades, disciplineNotes, models, isDark]);
 
   const resetDraftModel = () => {
     setDraftModelName("");
@@ -1325,6 +1413,35 @@ export default function ClientApp() {
       </nav>
 
       <div className="mt-auto pt-4 relative flex flex-col gap-2">
+        {/* Auth: Sign in with Google / Sign out */}
+        <div className={`flex items-center gap-2 ${sidebarOpen ? "flex-row" : "flex-col"}`}>
+          {!authReady ? (
+            <span className="text-xs text-gray-500 dark:text-[#a1a1aa] py-2">Loading…</span>
+          ) : user ? (
+            <button
+              type="button"
+              onClick={() => createSupabaseClient().auth.signOut()}
+              className={`flex items-center flex-1 min-w-0 w-full ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-2.5 rounded-xl border border-white/60 dark:border-[#3f3f46] bg-white/30 dark:bg-[#3f3f46] text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/50 dark:hover:bg-[#52525b] transition-all`}
+            >
+              <LucideLogOut size={18} strokeWidth={2} />
+              {sidebarOpen && <span className="ml-3 truncate">{user.email ?? "Sign out"}</span>}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                createSupabaseClient().auth.signInWithOAuth({
+                  provider: "google",
+                  options: { redirectTo: `${typeof window !== "undefined" ? window.location.origin : ""}/auth/callback` },
+                });
+              }}
+              className={`flex items-center flex-1 min-w-0 w-full ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-2.5 rounded-xl bg-[#2e2e2e] text-white hover:bg-black transition-all text-sm font-medium shadow-md dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]`}
+            >
+              <LucideLogIn size={18} strokeWidth={2} />
+              {sidebarOpen && <span className="ml-3 whitespace-nowrap">Sign in with Google</span>}
+            </button>
+          )}
+        </div>
         <div className={`flex items-center gap-2 ${sidebarOpen ? "flex-row" : "flex-col"}`}>
           <button
             type="button"
@@ -1384,6 +1501,35 @@ export default function ClientApp() {
           />
           <div className="fixed top-14 left-0 right-0 z-50 max-h-[calc(100vh-3.5rem)] overflow-y-auto md:hidden bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border-b border-white/60 dark:border-[#3f3f46] shadow-lg">
             <nav className="flex flex-col p-4 gap-1">
+              {authReady && (
+                <div className="pb-3 mb-3 border-b border-white/50 dark:border-[#3f3f46]">
+                  {user ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        createSupabaseClient().auth.signOut();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="flex items-center w-full px-4 py-2.5 rounded-xl bg-white/30 dark:bg-[#3f3f46] text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa]"
+                    >
+                      <LucideLogOut size={18} className="mr-3" /> {user.email ?? "Sign out"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        createSupabaseClient().auth.signInWithOAuth({
+                          provider: "google",
+                          options: { redirectTo: `${typeof window !== "undefined" ? window.location.origin : ""}/auth/callback` },
+                        });
+                      }}
+                      className="flex items-center w-full px-4 py-2.5 rounded-xl bg-[#2e2e2e] text-white text-sm font-medium dark:bg-[#3f3f46] dark:text-[#fafafa]"
+                    >
+                      <LucideLogIn size={18} className="mr-3" /> Sign in with Google
+                    </button>
+                  )}
+                </div>
+              )}
               {NAV_ITEMS.map((item) => {
                 const IconComponent = item.icon;
                 return (
@@ -1734,13 +1880,29 @@ export default function ClientApp() {
         <button
           type="button"
           onClick={() => {
+            if (typeof window !== "undefined" && !window.confirm("Clear all trades and discipline notes? Your saved models will be kept. This cannot be undone." + (user ? " Data will be cleared from your account on all devices." : ""))) return;
             setTrades([]);
             setSelectedTrade(null);
+            setDisciplineNotes({});
             try {
               localStorage.removeItem(TRADES_STORAGE_KEY);
               localStorage.removeItem(USER_HAS_IMPORTED_KEY);
+              localStorage.removeItem(DISCIPLINE_NOTES_STORAGE_KEY);
             } catch {
               // ignore
+            }
+            if (user) {
+              fetch("/api/user-data", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  trades: [],
+                  discipline_notes: {},
+                  models,
+                  theme: isDark ? "dark" : "light",
+                  user_has_imported: false,
+                }),
+              }).catch(() => {});
             }
           }}
           className="text-xs text-gray-400 dark:text-[#71717a] hover:text-gray-600 dark:hover:text-[#a1a1aa] underline underline-offset-2"
