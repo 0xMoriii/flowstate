@@ -837,38 +837,21 @@ export default function ClientApp() {
     setQuote(MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]);
   }, []);
 
-  // Supabase auth: init session and subscribe to changes.
+  // Auth: use API as source of truth so session works after refresh and across devices (server has cookies).
   useEffect(() => {
     let mounted = true;
-    const supabase = createSupabaseClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (mounted) {
-        setUser(session?.user ? { id: session.user.id, email: session.user.email ?? undefined } : null);
-        setAuthReady(true);
-      }
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        setUser(session?.user ? { id: session.user.id, email: session.user.email ?? undefined } : null);
-      }
-    });
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  // When auth is ready: load from API (signed in) or localStorage (signed out).
-  const [userDataFetched, setUserDataFetched] = useState(false);
-  useEffect(() => {
-    if (!authReady) return;
-    if (user) {
-      fetch("/api/user-data")
-        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load"))))
-        .then((data) => {
-          if (Array.isArray(data.trades)) setTrades(data.trades.length > 0 ? data.trades : generateMockTrades());
+    fetch("/api/user-data", { credentials: "include" })
+      .then((res) => {
+        if (!mounted) return;
+        if (res.ok) return res.json();
+        if (res.status === 401) return null;
+        return Promise.reject(new Error("Failed to load"));
+      })
+      .then((data) => {
+        if (!mounted) return;
+        if (data?.user) {
+          setUser({ id: data.user.id, email: data.user.email });
+          if (Array.isArray(data.trades)) setTrades(data.trades);
           if (data.discipline_notes && typeof data.discipline_notes === "object") setDisciplineNotes(data.discipline_notes);
           if (Array.isArray(data.models)) setModels(data.models);
           if (data.theme === "dark" || data.theme === "light") {
@@ -882,15 +865,34 @@ export default function ClientApp() {
               // ignore
             }
           }
-        })
-        .catch(() => {})
-        .finally(() => setUserDataFetched(true));
-    } else {
-      const stored = loadTradesFromStorage();
-      setTrades(stored && stored.length > 0 ? stored : generateMockTrades());
-      setUserDataFetched(true);
-    }
-  }, [authReady, user?.id]);
+        } else {
+          setUser(null);
+          const stored = loadTradesFromStorage();
+          setTrades(stored && stored.length > 0 ? stored : generateMockTrades());
+        }
+      })
+      .catch(() => {
+        if (mounted) setUser(null);
+      })
+      .finally(() => {
+        if (mounted) setAuthReady(true);
+        if (mounted) setUserDataFetched(true);
+      });
+    const supabase = createSupabaseClient();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? undefined });
+      else setUser(null);
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const [userDataFetched, setUserDataFetched] = useState(false);
 
   const [chartTimeframe, setChartTimeframe] = useState("ALL");
 
@@ -1026,6 +1028,7 @@ export default function ClientApp() {
       saveToApiRef.current = null;
       fetch("/api/user-data", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: payload,
       })
@@ -1894,6 +1897,7 @@ export default function ClientApp() {
             if (user) {
               fetch("/api/user-data", {
                 method: "POST",
+                credentials: "include",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   trades: [],

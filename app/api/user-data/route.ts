@@ -25,15 +25,17 @@ export async function GET() {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json(
-    data ?? {
-      trades: [],
-      discipline_notes: {},
-      models: [],
-      theme: null,
-      user_has_imported: false,
-    }
-  );
+  const payload = data ?? {
+    trades: [],
+    discipline_notes: {},
+    models: [],
+    theme: null,
+    user_has_imported: false,
+  };
+  return NextResponse.json({
+    user: { id: user.id, email: user.email ?? undefined },
+    ...payload,
+  });
 }
 
 export async function POST(request: Request) {
