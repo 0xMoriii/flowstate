@@ -351,6 +351,107 @@ const CALENDAR_FULL_MIN_WIDTH = CALENDAR_DAY_MIN_WIDTH * 8 + CALENDAR_GRID_GAP_P
 
 type CalendarTrade = ReturnType<typeof generateMockTrades>[number];
 
+type TradeForMetrics = {
+  pnl: number;
+  entryTime: number;
+  notes?: string;
+  tags?: string[];
+  strength?: number;
+  chartImages?: string[];
+};
+
+function computeMetricsFromTrades(
+  trades: TradeForMetrics[]
+): {
+  profitFactor: number;
+  winLossRatio: number;
+  disciplineScore: number;
+  score: number;
+  totalTrades: number;
+  winRate: number;
+  expectedReturn: number;
+  components: { pfComponent: number; discComponent: number; riskAdjComponent: number };
+} | null {
+  if (!trades.length) return null;
+  const wins = trades.filter((t) => t.pnl > 0);
+  const losses = trades.filter((t) => t.pnl <= 0);
+  const grossProfit = wins.reduce((sum, t) => sum + t.pnl, 0);
+  const grossLoss = Math.abs(losses.reduce((sum, t) => sum + t.pnl, 0));
+  const profitFactor = grossLoss === 0 ? grossProfit : grossProfit / grossLoss;
+  const expectedReturn = (grossProfit - grossLoss) / trades.length;
+
+  const winCount = wins.length;
+  const winLossRatio = trades.length ? (winCount / trades.length) * 100 : 0;
+
+  const lossAmounts = losses.map((t) => Math.abs(t.pnl));
+  let riskConsistencyScore = 100;
+  if (lossAmounts.length >= 2) {
+    const mean = lossAmounts.reduce((a, b) => a + b, 0) / lossAmounts.length;
+    const variance = lossAmounts.reduce((s, x) => s + (x - mean) ** 2, 0) / lossAmounts.length;
+    const stdDev = Math.sqrt(variance);
+    const cv = mean > 0 ? stdDev / mean : 1;
+    riskConsistencyScore = Math.max(0, Math.min(100, 100 - 50 * cv));
+  }
+
+  const journalingScores = trades.map((t) => {
+    const hasNotes = (t.notes?.trim() ?? "").length > 0;
+    const tagCount = t.tags?.length ?? 0;
+    const imageCount = t.chartImages?.length ?? 0;
+    const notePart = hasNotes ? 40 : 0;
+    const tagPart = Math.min(tagCount * 12, 30);
+    const imagePart = Math.min(imageCount * 15, 30);
+    return Math.min(100, notePart + tagPart + imagePart);
+  });
+  const journalingScore = journalingScores.length
+    ? journalingScores.reduce((a, b) => a + b, 0) / journalingScores.length
+    : 0;
+
+  const strengths = trades.map((t) => t.strength ?? 0).filter((s) => s >= 0);
+  const avgStrength = strengths.length ? strengths.reduce((a, b) => a + b, 0) / strengths.length : 0;
+  const strengthScore = Math.min(100, (avgStrength / 5) * 100);
+
+  const disciplineScore = Math.round(
+    (riskConsistencyScore * 1) / 3 + (journalingScore * 1) / 3 + (strengthScore * 1) / 3,
+  );
+
+  // PF: 1.0 → 0 pts, 3.0 → 40 pts (linear between 1 and 3)
+  const pfComponent =
+    profitFactor <= 1 ? 0 : Math.min(40, ((Math.min(profitFactor, 3) - 1) / 2) * 40);
+  const discComponent = disciplineScore * 0.4;
+
+  // Risk-adjusted (max 20): expectancy per unit risk + drawdown
+  const avgLoss = losses.length > 0 ? grossLoss / losses.length : 0;
+  const expectancyRatio = avgLoss > 0 ? expectedReturn / avgLoss : (expectedReturn > 0 ? 2 : 0);
+  const expectancyPart = 10 * Math.min(expectancyRatio, 2) / 2;
+
+  const sortedByTime = [...trades].sort((a, b) => a.entryTime - b.entryTime);
+  let cum = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+  for (const t of sortedByTime) {
+    cum += t.pnl;
+    if (cum > peak) peak = cum;
+    const dd = peak - cum;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+  const drawdownRatio = peak > 0 ? maxDrawdown / peak : 0;
+  const drawdownPart = 10 * (1 - Math.min(drawdownRatio, 1));
+  const riskAdjComponent = Math.min(20, Math.max(0, expectancyPart + drawdownPart));
+
+  const score = Math.min(100, Math.max(0, pfComponent + discComponent + riskAdjComponent));
+
+  return {
+    profitFactor,
+    winLossRatio,
+    disciplineScore,
+    score,
+    totalTrades: trades.length,
+    winRate: (wins.length / trades.length) * 100,
+    expectedReturn,
+    components: { pfComponent, discComponent, riskAdjComponent },
+  };
+}
+
 function CalendarView({
   trades,
   setTrades,
@@ -722,6 +823,7 @@ export default function ClientApp() {
   // Load from localStorage or mock data only after mount in useEffect.
   const [trades, setTrades] = useState<ReturnType<typeof generateMockTrades>>(() => []);
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
+  const [coachFocusedTrade, setCoachFocusedTrade] = useState<ReturnType<typeof generateMockTrades>[number] | null>(null);
   const [importStatus, setImportStatus] = useState("");
   const [quote, setQuote] = useState(MARK_DOUGLAS_QUOTES[0]);
   useEffect(() => {
@@ -1103,72 +1205,31 @@ export default function ClientApp() {
   };
 
   const metrics = useMemo(() => {
-    if (!trades.length) return null;
-    const wins = trades.filter((t) => t.pnl > 0);
-    const losses = trades.filter((t) => t.pnl <= 0);
-    const grossProfit = wins.reduce((sum, t) => sum + t.pnl, 0);
-    const grossLoss = Math.abs(losses.reduce((sum, t) => sum + t.pnl, 0));
-    const profitFactor = grossLoss === 0 ? grossProfit : grossProfit / grossLoss;
-    const expectedReturn = (grossProfit - grossLoss) / trades.length;
-
-    // Win/Loss ratio as percentage: % of trades that were wins (e.g. 6 wins of 10 = 60%)
-    const winCount = wins.length;
-    const winLossRatio = trades.length ? (winCount / trades.length) * 100 : 0;
-
-    // Discipline: 3 factors (equal weight) → 0–100
-    // 1) Risk consistency: losses in a tight range (low variance) = higher score
-    const lossAmounts = losses.map((t) => Math.abs(t.pnl));
-    let riskConsistencyScore = 100;
-    if (lossAmounts.length >= 2) {
-      const mean = lossAmounts.reduce((a, b) => a + b, 0) / lossAmounts.length;
-      const variance = lossAmounts.reduce((s, x) => s + (x - mean) ** 2, 0) / lossAmounts.length;
-      const stdDev = Math.sqrt(variance);
-      const cv = mean > 0 ? stdDev / mean : 1; // coefficient of variation
-      riskConsistencyScore = Math.max(0, Math.min(100, 100 - 50 * cv));
-    }
-
-    // 2) Journaling: notes, tags, and chart images per trade (proper logging = higher score)
-    const journalingScores = trades.map((t) => {
-      const hasNotes = (t.notes?.trim() ?? "").length > 0;
-      const tagCount = t.tags?.length ?? 0;
-      const imageCount = (t as { chartImages?: string[] }).chartImages?.length ?? 0;
-      const notePart = hasNotes ? 40 : 0;
-      const tagPart = Math.min(tagCount * 12, 30);
-      const imagePart = Math.min(imageCount * 15, 30);
-      return Math.min(100, notePart + tagPart + imagePart);
-    });
-    const journalingScore = journalingScores.length
-      ? journalingScores.reduce((a, b) => a + b, 0) / journalingScores.length
-      : 0;
-
-    // 3) Strength meter: higher average strength (1–5) = better discipline
-    const strengths = trades.map((t) => t.strength ?? 0).filter((s) => s >= 0);
-    const avgStrength = strengths.length ? strengths.reduce((a, b) => a + b, 0) / strengths.length : 0;
-    const strengthScore = Math.min(100, (avgStrength / 5) * 100);
-
-    const disciplineScore = Math.round(
-      (riskConsistencyScore * 1) / 3 + (journalingScore * 1) / 3 + (strengthScore * 1) / 3,
-    );
-
-    const pfComponent = Math.min(profitFactor, 3) / 3 * 40;
-    const discComponent = disciplineScore * 0.4;
-    const baseBuffer = 20;
-    const score = Math.min(100, Math.max(0, pfComponent + discComponent + baseBuffer));
+    const result = computeMetricsFromTrades(trades);
+    if (!result) return null;
 
     const bestTrade = trades.reduce((prev, current) => (prev.pnl > current.pnl ? prev : current));
     const worstTrade = trades.reduce((prev, current) => (prev.pnl < current.pnl ? prev : current));
 
+    const now = Date.now();
+    const ms30 = 30 * 86400000;
+    const current30 = trades.filter((t) => t.entryTime >= now - ms30);
+    const prior30 = trades.filter((t) => t.entryTime >= now - ms30 * 2 && t.entryTime < now - ms30);
+    const currentM = computeMetricsFromTrades(current30);
+    const priorM = computeMetricsFromTrades(prior30);
+    const hasPriorData = !!(priorM && priorM.totalTrades > 0 && currentM && currentM.totalTrades > 0);
+    const trends = {
+      hasPrevData: hasPriorData,
+      score: hasPriorData ? currentM!.score - priorM!.score : 0,
+      profitFactor: hasPriorData ? currentM!.profitFactor - priorM!.profitFactor : 0,
+      disciplineScore: hasPriorData ? currentM!.disciplineScore - priorM!.disciplineScore : 0,
+    };
+
     return {
-      profitFactor,
-      winLossRatio,
-      disciplineScore,
-      score,
-      totalTrades: trades.length,
-      winRate: (wins.length / trades.length) * 100,
+      ...result,
       bestTrade,
       worstTrade,
-      components: { pfComponent, discComponent, baseBuffer },
-      trends: { hasPrevData: false, score: 0, profitFactor: 0, disciplineScore: 0 },
+      trends,
     };
   }, [trades]);
 
@@ -1219,7 +1280,7 @@ export default function ClientApp() {
 
   const renderSidebar = () => (
     <div
-      className={`hidden md:flex ${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 dark:bg-[#27272a] backdrop-blur-xl border-r border-white/50 dark:border-[#3f3f46] flex-col px-4 pb-4 pt-[49px] shrink-0 z-20`}
+      className={`hidden md:flex ${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 dark:bg-[#27272a] backdrop-blur-xl border-r border-white/50 dark:border-[#3f3f46] flex-col px-4 pb-[16px] pt-[16px] shrink-0 z-20`}
     >
       <div className="flex flex-col gap-4 mb-8 mt-4">
         <div className="w-full relative h-10 min-h-[2.5rem] flex items-center">
@@ -1438,12 +1499,15 @@ export default function ClientApp() {
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">Base Buffer</span>
+                <span className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">Risk-Adjusted (Max 20)</span>
                 <span className="text-sm font-semibold text-[#2e2e2e] dark:text-[#fafafa]">
-                  {(metrics?.components.baseBuffer ?? 0).toFixed(1)}
+                  {(metrics?.components.riskAdjComponent ?? 0).toFixed(1)}
                 </span>
               </div>
             </div>
+            <p className="text-[11px] font-light text-gray-500 dark:text-[#a1a1aa] leading-relaxed mt-3 pt-2 border-t border-gray-200 dark:border-[#3f3f46]">
+              Total = Profit Factor (PF 1.0→0 pts, 3.0→40 pts) + Discipline (0–100% → 40 pts) + Risk-Adjusted (expectancy vs risk + drawdown, 20 pts max). Score is the sum, capped 0–100.
+            </p>
           </div>
         </div>
 
@@ -1602,7 +1666,7 @@ export default function ClientApp() {
               <button
                 key={tf}
                 onClick={() => setChartTimeframe(tf)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${chartTimeframe === tf ? "bg-[#2e2e2e] dark:bg-[#3f3f46] text-white dark:text-[#fafafa] shadow-sm" : "text-gray-500 dark:text-[#a1a1aa] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"}`}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${chartTimeframe === tf ? "bg-[#2e2e2e] dark:bg-[#52525b] text-white dark:text-[#fafafa] shadow-sm" : "text-gray-500 dark:text-[#a1a1aa] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"}`}
               >
                 {tf}
               </button>
@@ -1688,19 +1752,30 @@ export default function ClientApp() {
   );
 
   const renderDailyRecap = () => {
-    const today = new Date().toDateString();
-    const todaysTrades = trades.filter((t) => new Date(t.entryTime).toDateString() === today);
+    // Use the most recent day that has at least one trade (so weekends / no-trade days still show last recap)
+    const datesWithTrades = [...new Set(trades.map((t) => new Date(t.entryTime).toDateString()))].sort(
+      (a, b) => new Date(b).getTime() - new Date(a).getTime()
+    );
+    const recapDate = datesWithTrades[0] ?? null;
+    const recapTrades = recapDate
+      ? trades.filter((t) => new Date(t.entryTime).toDateString() === recapDate)
+      : [];
 
     return (
       <div className="flex flex-col gap-8 fade-in">
         <div className="space-y-6">
           <h2 className="display-font text-5xl mb-6 text-[#2e2e2e] dark:text-[#fafafa]">Daily Recap</h2>
-          {todaysTrades.length === 0 ? (
+          {recapDate && (
+            <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] -mt-2">
+              Showing recap for {new Date(recapDate).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
+            </p>
+          )}
+          {recapTrades.length === 0 ? (
             <GlassCard>
-              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades recorded today.</p>
+              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades recorded yet.</p>
             </GlassCard>
           ) : (
-            todaysTrades.map((trade) => (
+            recapTrades.map((trade) => (
               <GlassCard
                 key={trade.id}
                 className={`cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${trade.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
@@ -1746,8 +1821,9 @@ export default function ClientApp() {
         </div>
         <AICoachPanel
           metrics={metrics}
+          trades={recapTrades}
           onPushNote={(note, tradeId) => {
-            if (!tradeId && todaysTrades.length > 0) tradeId = todaysTrades[0].id;
+            if (!tradeId && recapTrades.length > 0) tradeId = recapTrades[0].id;
             if (tradeId)
               setTrades(
                 trades.map((t) =>
@@ -1766,208 +1842,9 @@ export default function ClientApp() {
   const [calendarViewYear, setCalendarViewYear] = useState(now.getFullYear());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null);
 
-  const DisciplineView = () => {
-    const [selectedTag, setSelectedTag] = useState<string | null>(null);
-    const [selectedModelTag, setSelectedModelTag] = useState<string | null>(null);
-
-    const tagCounts = useMemo(() => {
-      const counts: Record<string, number> = {};
-      trades.forEach((t) => {
-        t.tags.forEach((tag) => {
-          counts[tag] = (counts[tag] ?? 0) + 1;
-        });
-      });
-      return counts;
-    }, [trades]);
-
-    const modelTagCounts = useMemo(() => {
-      const counts: Record<string, number> = {};
-      trades.forEach((t) => {
-        const m = (t as { modelTag?: string | null }).modelTag;
-        if (m && m.trim()) counts[m] = (counts[m] ?? 0) + 1;
-      });
-      return counts;
-    }, [trades]);
-
-    const sortedTags = useMemo(
-      () => Object.entries(tagCounts).sort((a, b) => b[1] - a[1]),
-      [tagCounts]
-    );
-    const sortedModelTags = useMemo(
-      () => Object.entries(modelTagCounts).sort((a, b) => b[1] - a[1]),
-      [modelTagCounts]
-    );
-
-    const filteredTrades = useMemo(() => {
-      let list = trades;
-      if (selectedTag) list = list.filter((t) => t.tags.includes(selectedTag));
-      if (selectedModelTag) list = list.filter((t) => (t as { modelTag?: string | null }).modelTag === selectedModelTag);
-      return list;
-    }, [trades, selectedTag, selectedModelTag]);
-
-    const notesKey = selectedModelTag ? `model:${selectedModelTag}` : selectedTag;
-    const maxCount = sortedTags.length ? Math.max(...sortedTags.map(([, c]) => c)) : 1;
-    const maxModelCount = sortedModelTags.length ? Math.max(...sortedModelTags.map(([, c]) => c)) : 1;
-
-    return (
-      <div className="fade-in space-y-6">
-        <h2 className="display-font text-5xl text-[#2e2e2e] dark:text-[#fafafa]">Discipline</h2>
-        <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-xl">
-          Filter by tag or model to review trades and work through discipline problems. Use Flow Lab to discuss the filtered set and attach notes.
-        </p>
-
-        {/* Tags (per-trade tags) */}
-        <div className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Tags</span>
-          <div className="flex flex-wrap gap-3 items-center">
-            {sortedTags.length === 0 ? (
-              <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No tags yet. Add tags to trades in trade details.</span>
-            ) : (
-              sortedTags.map(([tag, count]) => {
-                const isSelected = selectedTag === tag;
-                const isHighCount = maxCount > 0 && count >= maxCount * 0.8;
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => {
-                      setSelectedTag(isSelected ? null : tag);
-                      setSelectedModelTag(null);
-                    }}
-                    className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
-                      isSelected
-                        ? "bg-[#2e2e2e] text-white border-[#2e2e2e] font-semibold"
-                        : "bg-white/40 dark:bg-[#27272a] border-white/60 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/60 dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50 " +
-                          (isHighCount ? "font-semibold" : "font-medium")
-                    }`}
-                  >
-                    {tag}
-                    <span className="ml-1.5 text-gray-500 dark:text-[#a1a1aa] font-normal">({count})</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Models (model tag from Models page) */}
-        <div className="space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Models</span>
-          <div className="flex flex-wrap gap-3 items-center">
-            {sortedModelTags.length === 0 ? (
-              <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No model tags yet. Assign a model in trade details.</span>
-            ) : (
-              sortedModelTags.map(([modelName, count]) => {
-                const isSelected = selectedModelTag === modelName;
-                const isHighCount = maxModelCount > 0 && count >= maxModelCount * 0.8;
-                return (
-                  <button
-                    key={modelName}
-                    type="button"
-                    onClick={() => {
-                      setSelectedModelTag(isSelected ? null : modelName);
-                      setSelectedTag(null);
-                    }}
-                    className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
-                      isSelected
-                        ? "bg-[#98935c] text-white border-[#98935c] font-semibold"
-                        : "bg-white/40 dark:bg-[#27272a] border-white/60 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/60 dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50 " +
-                          (isHighCount ? "font-semibold" : "font-medium")
-                    }`}
-                  >
-                    {modelName}
-                    <span className={`ml-1.5 font-normal ${isSelected ? "text-white/80" : "text-gray-500 dark:text-[#a1a1aa]"}`}>({count})</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Two columns: left = notes + trade list, right = Flow Lab */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6 min-h-0">
-            {notesKey ? (
-              <>
-                {/* Discipline notes for this tag or model */}
-                <GlassCard>
-                  <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
-                    Discipline notes — {selectedModelTag ? `Model: ${selectedModelTag}` : selectedTag}
-                  </label>
-                  <textarea
-                    value={disciplineNotes[notesKey] ?? ""}
-                    onChange={(e) =>
-                      setDisciplineNotes((prev) => ({ ...prev, [notesKey]: e.target.value }))
-                    }
-                    placeholder="Reflections and actions for this tag. Use Flow Lab to push AI insights here."
-                    className="w-full min-h-[120px] bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa]"
-                  />
-                </GlassCard>
-
-                {/* Filtered trade list */}
-                <GlassCard>
-                  <div className="flex justify-between items-end mb-4 pb-4 border-b border-white/50 dark:border-[#3f3f46]">
-                    <h3 className="display-font text-2xl text-[#2e2e2e] dark:text-[#fafafa]">
-                      Trades {selectedModelTag ? `model: "${selectedModelTag}"` : `tagged "${selectedTag}"`}
-                    </h3>
-                    <span className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa]">
-                      {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"}
-                    </span>
-                  </div>
-                  {filteredTrades.length === 0 ? (
-                    <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades with this tag.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[400px] overflow-y-auto">
-                      {filteredTrades.map((t) => (
-                        <div
-                          key={t.id}
-                          onClick={() => setSelectedTrade(t)}
-                          className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${
-                            t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"
-                          }`}
-                        >
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(t.instrument)}</span>
-                            <span
-                              className="font-medium"
-                              style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
-                            >
-                              {formatPnl(t.pnl, 2)}
-                            </span>
-                          </div>
-                          <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">
-                            {new Date(t.entryTime).toLocaleTimeString()} — {new Date(t.exitTime).toLocaleTimeString()}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </GlassCard>
-              </>
-            ) : (
-              <GlassCard className="flex items-center justify-center min-h-[200px]">
-                <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">Select a tag or model above to view trades and discipline notes.</p>
-              </GlassCard>
-            )}
-          </div>
-
-          <div className="lg:col-span-1">
-            <AICoachPanel
-              metrics={metrics}
-              onPushNote={(note) => {
-                if (selectedTag) {
-                  setDisciplineNotes((prev) => ({
-                    ...prev,
-                    [selectedTag]: (prev[selectedTag] ?? "").concat(prev[selectedTag] ? "\n\n" : "", note),
-                  }));
-                }
-              }}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // Lifted so discipline filters persist when ClientApp re-renders (e.g. selecting a trade or focusing one for coach)
+  const [disciplineSelectedTag, setDisciplineSelectedTag] = useState<string | null>(null);
+  const [disciplineSelectedModelTag, setDisciplineSelectedModelTag] = useState<string | null>(null);
 
   const renderStrategy = () => (
     <div className="fade-in space-y-8 max-w-4xl">
@@ -2071,7 +1948,7 @@ export default function ClientApp() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-4 mr-0">
             <div className="md:col-span-3">
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Context &amp; Setup
@@ -2083,7 +1960,7 @@ export default function ClientApp() {
                 placeholder="Market conditions, HTF context, session, structure you require before even thinking about an entry."
               />
             </div>
-            <div>
+            <div className="w-full min-w-0">
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Entry
               </label>
@@ -2094,7 +1971,7 @@ export default function ClientApp() {
                 placeholder="Primary entry signal, candle confirmation, execution pattern."
               />
             </div>
-            <div>
+            <div className="w-full min-w-0">
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
                 Risk
               </label>
@@ -2387,7 +2264,21 @@ export default function ClientApp() {
               isMobile={isMobile}
             />
           )}
-          {activeTab === "discipline" && <DisciplineView />}
+          {activeTab === "discipline" && (
+            <DisciplineTabContent
+              selectedTag={disciplineSelectedTag}
+              setSelectedTag={setDisciplineSelectedTag}
+              selectedModelTag={disciplineSelectedModelTag}
+              setSelectedModelTag={setDisciplineSelectedModelTag}
+              trades={trades}
+              metrics={metrics}
+              setSelectedTrade={setSelectedTrade}
+              disciplineNotes={disciplineNotes}
+              setDisciplineNotes={setDisciplineNotes}
+              coachFocusedTrade={coachFocusedTrade}
+              setCoachFocusedTrade={setCoachFocusedTrade}
+            />
+          )}
           {activeTab === "strategy" && renderStrategy()}
         </main>
       </div>
@@ -2415,14 +2306,60 @@ export default function ClientApp() {
 type MetricsShape = {
   profitFactor: number;
   disciplineScore: number;
+  totalTrades?: number;
+  winRate?: number;
+  bestTrade?: { instrument: string; entryTime: number; pnl: number };
+  worstTrade?: { instrument: string; entryTime: number; pnl: number };
   [key: string]: unknown;
 } | null;
 
+// Build a short, coach-friendly summary of recent trades for context (not the main focus).
+function buildTradesContext(
+  trades: Array<{ id: string; instrument: string; entryTime: number; pnl: number; tags: string[]; notes?: string; strength?: number }>,
+  max = 12
+): string {
+  if (!trades.length) return "No trades logged yet.";
+  const sorted = [...trades].sort((a, b) => b.entryTime - a.entryTime).slice(0, max);
+  return sorted
+    .map((t, i) => {
+      const date = new Date(t.entryTime).toLocaleDateString();
+      const notesSnippet = (t.notes?.trim() ?? "").slice(0, 80);
+      return `${i + 1}. ${t.instrument} | ${date} | PnL ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)} | tags: ${(t.tags ?? []).join(", ") || "—"}${notesSnippet ? ` | notes: ${notesSnippet}${notesSnippet.length >= 80 ? "…" : ""}` : ""}`;
+    })
+    .join("\n");
+}
+
+type FocusedTradeForCoach = {
+  id: string;
+  instrument: string;
+  entryTime: number;
+  exitTime: number;
+  pnl: number;
+  tags: string[];
+  notes?: string;
+  strength?: number;
+  modelTag?: string | null;
+};
+
+function buildFocusedTradeBlob(t: FocusedTradeForCoach): string {
+  const entryDate = new Date(t.entryTime).toLocaleString();
+  const exitDate = new Date(t.exitTime).toLocaleString();
+  const notes = (t.notes?.trim() ?? "") || "—";
+  const modelTag = (t as { modelTag?: string | null }).modelTag ?? "—";
+  return `Instrument: ${t.instrument} | Entry: ${entryDate} | Exit: ${exitDate} | PnL: ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)} | Tags: ${(t.tags ?? []).join(", ") || "—"} | Model: ${modelTag} | Strength (1-5): ${t.strength ?? "—"} | Notes: ${notes}`;
+}
+
 const AICoachPanel = ({
   metrics,
+  trades = [],
+  focusedTrade = null,
+  onClearFocusedTrade,
   onPushNote,
 }: {
   metrics: MetricsShape;
+  trades?: Array<{ id: string; instrument: string; entryTime: number; pnl: number; tags: string[]; notes?: string; strength?: number }>;
+  focusedTrade?: FocusedTradeForCoach | null;
+  onClearFocusedTrade?: () => void;
   onPushNote: (note: string, tradeId?: string) => void;
 }) => {
   const [chat, setChat] = useState<{ role: string; content: string }[]>([]);
@@ -2441,21 +2378,41 @@ const AICoachPanel = ({
     setChat((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
 
-    const sysInst = `You are a trading coach in "The Performance Lab". Synthesize the perspectives of Mark Douglas, Jim Simons, and Fabio Valentini—but do not name or cite them in your replies. Be direct, analytical, devoid of emotional cushioning. Metrics: PF: ${metrics.profitFactor.toFixed(2)}, Discipline: ${metrics.disciplineScore.toFixed(0)}%. Be substantive and insightful: give enough detail to be useful within 1-2 paragraphs.`;
+    const tradesBlob = buildTradesContext(trades);
+    const bestWorst =
+      metrics.bestTrade && metrics.worstTrade
+        ? ` Best trade: ${metrics.bestTrade.instrument} ${new Date(metrics.bestTrade.entryTime).toLocaleDateString()} PnL ${metrics.bestTrade.pnl.toFixed(2)}. Worst: ${metrics.worstTrade.instrument} ${new Date(metrics.worstTrade.entryTime).toLocaleDateString()} PnL ${metrics.worstTrade.pnl.toFixed(2)}.`
+        : "";
+
+    const focusedBlock = focusedTrade
+      ? `\n\nThe user has selected a specific trade to discuss. Base your response on this trade; their question is about it.\nFOCUSED TRADE: ${buildFocusedTradeBlob(focusedTrade)}`
+      : "";
+
+    const sysInst = `You are a trading coach in "The Performance Lab". Synthesize the perspectives of Mark Douglas, Jim Simons, and Fabio Valentini—but do not name or cite them. Be direct, analytical, and concise.
+
+Primary rule: Answer the trader's question directly and first. Address what they actually asked (e.g. a specific trade, psychology, execution, sizing, patterns). Do not default to discussing profit factor or discipline index unless the question is clearly about those metrics.${focusedBlock}
+
+Use the following only as context when relevant to the question:
+- Summary stats (use only when they support your answer): ${metrics.totalTrades ?? 0} trades, win rate ${(metrics.winRate ?? 0).toFixed(0)}%, profit factor ${metrics.profitFactor.toFixed(2)}, discipline score ${metrics.disciplineScore.toFixed(0)}%.${bestWorst}
+- Recent trades (reference specific trades by instrument/date when the question is about what went wrong/right, patterns, or execution):
+${tradesBlob}
+
+When the question is about a specific trade or pattern, cite concrete examples from the trade list. When it's about mindset or process, focus on that. Keep responses substantive but focused; 1–2 paragraphs unless the question demands more.`;
+
     const response = await generateAIResponse(userMsg, sysInst);
     setChat((prev) => [...prev, { role: "ai", content: response }]);
     setLoading(false);
   };
 
   return (
-    <GlassCard className="flex flex-col h-[800px] max-md:max-h-[70vh] max-md:min-h-[320px]">
+    <GlassCard className="flex flex-col h-full min-h-[600px] max-md:max-h-[70vh] max-md:min-h-[320px]">
       <div className="flex items-center mb-4 pb-4 border-b border-white/50 dark:border-[#3f3f46]">
         <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">Flow Lab</h3>
       </div>
       <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
         {chat.length === 0 && (
           <div className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] italic">
-            Initiate sequence. State your psychological hurdle.
+            Ask about a specific trade, execution, mindset, or patterns—the coach will answer directly and use your stats only when relevant.
           </div>
         )}
         {chat.map((msg, idx) => (
@@ -2486,6 +2443,20 @@ const AICoachPanel = ({
         )}
         <div ref={chatEndRef} />
       </div>
+      {focusedTrade && onClearFocusedTrade && (
+        <div className="flex items-center justify-between gap-2 mb-3 py-2 px-3 rounded-xl bg-[#98935c]/10 border border-[#98935c]/40">
+          <span className="text-xs font-medium text-[#2e2e2e] dark:text-[#fafafa] truncate">
+            Focusing on: {focusedTrade.instrument} · {new Date(focusedTrade.entryTime).toLocaleDateString()} · {focusedTrade.pnl >= 0 ? "+" : ""}{focusedTrade.pnl.toFixed(2)}
+          </span>
+          <button
+            type="button"
+            onClick={onClearFocusedTrade}
+            className="shrink-0 text-xs font-semibold uppercase tracking-wider text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa] transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <div className="flex gap-2 min-w-0">
         <input
           type="text"
@@ -2493,7 +2464,7 @@ const AICoachPanel = ({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
           className="flex-1 min-w-0 bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa]"
-          placeholder="Query the coach..."
+          placeholder={focusedTrade ? "Ask about this trade..." : "Ask the coach..."}
         />
         <button
           onClick={handleSend}
@@ -2517,6 +2488,241 @@ const AICoachPanel = ({
 };
 
 type Trade = ReturnType<typeof generateMockTrades>[0];
+
+// Stable component so the Discipline tab doesn't remount on parent re-render (avoids visual blink).
+type DisciplineTabContentProps = {
+  selectedTag: string | null;
+  setSelectedTag: (v: string | null) => void;
+  selectedModelTag: string | null;
+  setSelectedModelTag: (v: string | null) => void;
+  trades: ReturnType<typeof generateMockTrades>;
+  metrics: MetricsShape;
+  setSelectedTrade: (t: Trade | null) => void;
+  disciplineNotes: Record<string, string>;
+  setDisciplineNotes: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  coachFocusedTrade: Trade | null;
+  setCoachFocusedTrade: (t: Trade | null) => void;
+};
+
+const DisciplineTabContent = memo(function DisciplineTabContent({
+  selectedTag,
+  setSelectedTag,
+  selectedModelTag,
+  setSelectedModelTag,
+  trades,
+  metrics,
+  setSelectedTrade,
+  disciplineNotes,
+  setDisciplineNotes,
+  coachFocusedTrade,
+  setCoachFocusedTrade,
+}: DisciplineTabContentProps) {
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    trades.forEach((t) => {
+      t.tags.forEach((tag) => {
+        counts[tag] = (counts[tag] ?? 0) + 1;
+      });
+    });
+    return counts;
+  }, [trades]);
+
+  const modelTagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    trades.forEach((t) => {
+      const m = (t as { modelTag?: string | null }).modelTag;
+      if (m && m.trim()) counts[m] = (counts[m] ?? 0) + 1;
+    });
+    return counts;
+  }, [trades]);
+
+  const sortedTags = useMemo(
+    () => Object.entries(tagCounts).sort((a, b) => b[1] - a[1]),
+    [tagCounts]
+  );
+  const sortedModelTags = useMemo(
+    () => Object.entries(modelTagCounts).sort((a, b) => b[1] - a[1]),
+    [modelTagCounts]
+  );
+
+  const filteredTrades = useMemo(() => {
+    let list = trades;
+    if (selectedTag) list = list.filter((t) => t.tags.includes(selectedTag));
+    if (selectedModelTag) list = list.filter((t) => (t as { modelTag?: string | null }).modelTag === selectedModelTag);
+    return list;
+  }, [trades, selectedTag, selectedModelTag]);
+
+  const notesKey = selectedModelTag ? `model:${selectedModelTag}` : selectedTag;
+  const maxCount = sortedTags.length ? Math.max(...sortedTags.map(([, c]) => c)) : 1;
+  const maxModelCount = sortedModelTags.length ? Math.max(...sortedModelTags.map(([, c]) => c)) : 1;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="display-font text-5xl text-[#2e2e2e] dark:text-[#fafafa]">Discipline</h2>
+      <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-xl">
+        Filter by tag or model to review trades and work through discipline problems. Use Flow Lab to discuss the filtered set and attach notes.
+      </p>
+
+      <div className="space-y-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Tags</span>
+        <div className="flex flex-wrap gap-3 items-center">
+          {sortedTags.length === 0 ? (
+            <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No tags yet. Add tags to trades in trade details.</span>
+          ) : (
+            sortedTags.map(([tag, count]) => {
+              const isSelected = selectedTag === tag;
+              const isHighCount = maxCount > 0 && count >= maxCount * 0.8;
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTag(isSelected ? null : tag);
+                    setSelectedModelTag(null);
+                  }}
+                  className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
+                    isSelected
+                      ? "bg-[#2e2e2e] text-white border-[#2e2e2e] font-semibold"
+                      : "bg-white/40 dark:bg-[#27272a] border-white/60 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/60 dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50 " +
+                        (isHighCount ? "font-semibold" : "font-medium")
+                  }`}
+                >
+                  {tag}
+                  <span className="ml-1.5 text-gray-500 dark:text-[#a1a1aa] font-normal">({count})</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Models</span>
+        <div className="flex flex-wrap gap-3 items-center">
+          {sortedModelTags.length === 0 ? (
+            <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No model tags yet. Assign a model in trade details.</span>
+          ) : (
+            sortedModelTags.map(([modelName, count]) => {
+              const isSelected = selectedModelTag === modelName;
+              const isHighCount = maxModelCount > 0 && count >= maxModelCount * 0.8;
+              return (
+                <button
+                  key={modelName}
+                  type="button"
+                  onClick={() => {
+                    setSelectedModelTag(isSelected ? null : modelName);
+                    setSelectedTag(null);
+                  }}
+                  className={`shrink-0 px-4 py-2 rounded-full text-sm border transition-all focus:outline-none ${
+                    isSelected
+                      ? "bg-[#98935c] text-white border-[#98935c] font-semibold"
+                      : "bg-white/40 dark:bg-[#27272a] border-white/60 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] hover:bg-white/60 dark:hover:bg-[#3f3f46] hover:border-[#98935c]/50 " +
+                        (isHighCount ? "font-semibold" : "font-medium")
+                  }`}
+                >
+                  {modelName}
+                  <span className={`ml-1.5 font-normal ${isSelected ? "text-white/80" : "text-gray-500 dark:text-[#a1a1aa]"}`}>({count})</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1">
+          <AICoachPanel
+            metrics={metrics}
+            trades={trades}
+            focusedTrade={coachFocusedTrade}
+            onClearFocusedTrade={() => setCoachFocusedTrade(null)}
+            onPushNote={(note) => {
+              if (selectedTag) {
+                setDisciplineNotes((prev) => ({
+                  ...prev,
+                  [selectedTag]: (prev[selectedTag] ?? "").concat(prev[selectedTag] ? "\n\n" : "", note),
+                }));
+              }
+            }}
+          />
+        </div>
+
+        <div className="lg:col-span-2 space-y-6 min-h-0">
+          {notesKey ? (
+            <>
+              <GlassCard>
+                <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
+                  Discipline notes — {selectedModelTag ? `Model: ${selectedModelTag}` : selectedTag}
+                </label>
+                <textarea
+                  value={disciplineNotes[notesKey] ?? ""}
+                  onChange={(e) =>
+                    setDisciplineNotes((prev) => ({ ...prev, [notesKey]: e.target.value }))
+                  }
+                  placeholder="Reflections and actions for this tag. Use Flow Lab to push AI insights here."
+                  className="w-full min-h-[120px] bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa]"
+                />
+              </GlassCard>
+
+              <GlassCard>
+                <div className="flex justify-between items-end mb-4 pb-4 border-b border-white/50 dark:border-[#3f3f46]">
+                  <h3 className="display-font text-2xl text-[#2e2e2e] dark:text-[#fafafa]">
+                    Trades {selectedModelTag ? `model: "${selectedModelTag}"` : `tagged "${selectedTag}"`}
+                  </h3>
+                  <span className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa]">
+                    {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"}
+                  </span>
+                </div>
+                {filteredTrades.length === 0 ? (
+                  <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades with this tag.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[400px] overflow-y-auto">
+                    {filteredTrades.map((t) => (
+                      <div
+                        key={t.id}
+                        onClick={() => setSelectedTrade(t)}
+                        className={`p-4 rounded-xl cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${
+                          t.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"
+                        }`}
+                      >
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(t.instrument)}</span>
+                          <span
+                            className="font-medium"
+                            style={{ color: t.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+                          >
+                            {formatPnl(t.pnl, 2)}
+                          </span>
+                        </div>
+                        <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">
+                          {new Date(t.entryTime).toLocaleTimeString()} — {new Date(t.exitTime).toLocaleTimeString()}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCoachFocusedTrade(t);
+                          }}
+                          className="mt-3 w-full py-2 rounded-lg text-xs font-semibold uppercase tracking-wider border border-[#98935c]/60 text-[#98935c] hover:bg-[#98935c]/10 transition-colors"
+                        >
+                          Flow Lab
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </GlassCard>
+            </>
+          ) : (
+            <GlassCard className="flex items-center justify-center min-h-[200px]">
+              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">Select a tag or model above to view trades and discipline notes.</p>
+            </GlassCard>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 // Map broker/instrument symbol to TradingView widget symbol (exchange:symbol).
 // Handles futures (CME_MINI continuous ES1!/NQ1!, CME, COMEX, CBOT), crypto (BINANCE), and US stocks.
