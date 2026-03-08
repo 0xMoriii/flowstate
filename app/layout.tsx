@@ -12,6 +12,19 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Flowstate",
   description: "Trading performance dashboard and coach",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "https://your-app.vercel.app"),
+  openGraph: {
+    title: "Flowstate",
+    description: "Trading performance dashboard and coach",
+    type: "website",
+    images: ["/og-image.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Flowstate",
+    description: "Trading performance dashboard and coach",
+    images: ["/og-image.png"],
+  },
 };
 
 export default async function RootLayout({
