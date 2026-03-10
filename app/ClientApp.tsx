@@ -32,6 +32,7 @@ import {
   Moon as LucideMoon,
   LogIn as LucideLogIn,
   LogOut as LucideLogOut,
+  Upload as LucideUpload,
   type LucideIcon,
 } from "lucide-react";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
@@ -802,6 +803,7 @@ const NAV_ITEMS = [
   { id: "calendar", icon: LucideCalendar, label: "Calendar" },
   { id: "discipline", icon: LucideBrain, label: "Discipline" },
   { id: "strategy", icon: LucideTarget, label: "Models" },
+  { id: "import", icon: LucideUpload, label: "Import Data" },
 ] as const;
 
 // --- MAIN APP (client-only; params are unwrapped by the server page so the client tree has no Promise props). ---
@@ -832,6 +834,7 @@ export default function ClientApp() {
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
   const [coachFocusedTrade, setCoachFocusedTrade] = useState<ReturnType<typeof generateMockTrades>[number] | null>(null);
   const [importStatus, setImportStatus] = useState("");
+  const [importBroker, setImportBroker] = useState<"tradovate" | "robinhood">("tradovate");
   const [quote, setQuote] = useState(MARK_DOUGLAS_QUOTES[0]);
   useEffect(() => {
     setQuote(MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]);
@@ -1133,39 +1136,68 @@ export default function ClientApp() {
     setEditingModelId((prev) => (prev === id ? null : prev));
   };
 
+  const parseCsvText = (text: string): { headers: string[]; rows: string[][] } => {
+    const rows: string[][] = [];
+    let current: string[] = [];
+    let field = "";
+    let inQuotes = false;
+
+    const pushField = () => {
+      current.push(field);
+      field = "";
+    };
+    const pushRow = () => {
+      if (current.length > 0) {
+        rows.push(current);
+      }
+      current = [];
+    };
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '"') {
+        if (inQuotes && text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === "," && !inQuotes) {
+        pushField();
+      } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
+        if (field !== "" || current.length > 0) {
+          pushField();
+          pushRow();
+        }
+        while (text[i + 1] === "\n" || text[i + 1] === "\r") i++;
+      } else {
+        field += ch;
+      }
+    }
+    if (field !== "" || current.length > 0) {
+      pushField();
+      pushRow();
+    }
+
+    if (!rows.length) return { headers: [], rows: [] };
+    const headers = rows[0].map((h) => h.trim());
+    return { headers, rows: rows.slice(1) };
+  };
+
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setImportStatus("Parsing Tradovate...");
+    const brokerLabel = importBroker === "tradovate" ? "Tradovate" : "Robinhood";
+    setImportStatus(`Parsing ${brokerLabel} CSV...`);
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const text = event.target?.result as string;
-        const lines = text.split("\n").filter((line) => line.trim());
-        if (lines.length < 2) throw new Error("File empty or missing data rows.");
+        const text = (event.target?.result as string) ?? "";
+        const { headers, rows } = parseCsvText(text);
+        if (!headers.length || !rows.length) throw new Error("File empty or missing data rows.");
 
-        const headers = lines[0].toLowerCase().split(",");
-        const pnlIdx = headers.indexOf("pnl");
-        const instIdx = headers.indexOf("symbol");
-        const boughtIdx = headers.indexOf("boughttimestamp");
-        const soldIdx = headers.indexOf("soldtimestamp");
-        const buyPriceIdx = headers.indexOf("buyprice");
-        const sellPriceIdx = headers.indexOf("sellprice");
-        const qtyIdx = headers.findIndex((h) => /quantity|qty|contracts|size/.test(h.trim()));
-
-        if (
-          pnlIdx === -1 ||
-          instIdx === -1 ||
-          boughtIdx === -1 ||
-          soldIdx === -1 ||
-          buyPriceIdx === -1 ||
-          sellPriceIdx === -1
-        ) {
-          throw new Error("Missing required columns. Ensure it is a valid Tradovate export.");
-        }
-
-        const parsedTrades: Array<{
+        type ParsedTrade = {
           id: string;
           instrument: string;
           entryTime: number;
@@ -1181,58 +1213,243 @@ export default function ClientApp() {
           notes: string;
           strength: number;
           modelAdherence: number;
-        }> = [];
+        };
 
-        for (let i = 1; i < lines.length; i++) {
-          const row = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-          if (row.length < headers.length) continue;
+        const parsedTrades: ParsedTrade[] = [];
+        const lowerHeaders = headers.map((h) => h.toLowerCase());
 
-          const rawPnl = row[pnlIdx] ?? "";
-          const isNegative = rawPnl.includes("(") && rawPnl.includes(")");
-          const cleanPnl = parseFloat(rawPnl.replace(/[^0-9.]/g, ""));
-          if (isNaN(cleanPnl)) continue;
-          const pnl = isNegative ? -cleanPnl : cleanPnl;
+        if (importBroker === "tradovate") {
+          const pnlIdx = lowerHeaders.indexOf("pnl");
+          const instIdx = lowerHeaders.indexOf("symbol");
+          const boughtIdx = lowerHeaders.indexOf("boughttimestamp");
+          const soldIdx = lowerHeaders.indexOf("soldtimestamp");
+          const buyPriceIdx = lowerHeaders.indexOf("buyprice");
+          const sellPriceIdx = lowerHeaders.indexOf("sellprice");
+          const qtyIdx = lowerHeaders.findIndex((h) => /quantity|qty|contracts|size/.test(h.trim()));
 
-          const t1 = new Date(row[boughtIdx].replace(/"/g, "")).getTime();
-          const t2 = new Date(row[soldIdx].replace(/"/g, "")).getTime();
-          if (isNaN(t1) || isNaN(t2)) continue;
+          if (
+            pnlIdx === -1 ||
+            instIdx === -1 ||
+            boughtIdx === -1 ||
+            soldIdx === -1 ||
+            buyPriceIdx === -1 ||
+            sellPriceIdx === -1
+          ) {
+            throw new Error("Missing required columns. Ensure it is a valid Tradovate export.");
+          }
 
-          const buyPrice = parseFloat(row[buyPriceIdx]);
-          const sellPrice = parseFloat(row[sellPriceIdx]);
+          rows.forEach((row, i) => {
+            if (row.length < headers.length) return;
+            const rawPnl = row[pnlIdx] ?? "";
+            const isNegative = rawPnl.includes("(") && rawPnl.includes(")");
+            const cleanPnl = parseFloat(String(rawPnl).replace(/[^0-9.]/g, ""));
+            if (Number.isNaN(cleanPnl)) return;
+            const pnl = isNegative ? -cleanPnl : cleanPnl;
 
-          const isLong = t1 < t2;
-          const entryTime = Math.min(t1, t2);
-          const exitTime = Math.max(t1, t2);
-          const entryPrice = isLong ? buyPrice : sellPrice;
-          const exitPrice = isLong ? sellPrice : buyPrice;
+            const t1 = new Date(String(row[boughtIdx]).replace(/"/g, "")).getTime();
+            const t2 = new Date(String(row[soldIdx]).replace(/"/g, "")).getTime();
+            if (Number.isNaN(t1) || Number.isNaN(t2)) return;
 
-          const rawQty = qtyIdx >= 0 ? parseInt(row[qtyIdx]?.replace(/"/g, ""), 10) : NaN;
-          const lotSize = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : undefined;
-          parsedTrades.push({
-            id: `csv_${Date.now()}_${i}`,
-            instrument: row[instIdx].replace(/"/g, "") || "UNKNOWN",
-            entryTime,
-            exitTime,
-            entryPrice,
-            exitPrice,
-            isLong,
-            pnl,
-            tags: ["Tradovate Import"],
-            modelTag: undefined,
-            lotSize,
-            notes: "",
-            strength: 0,
-            modelAdherence: 1,
+            const buyPrice = parseFloat(String(row[buyPriceIdx]));
+            const sellPrice = parseFloat(String(row[sellPriceIdx]));
+
+            const isLong = t1 < t2;
+            const entryTime = Math.min(t1, t2);
+            const exitTime = Math.max(t1, t2);
+            const entryPrice = isLong ? buyPrice : sellPrice;
+            const exitPrice = isLong ? sellPrice : buyPrice;
+
+            const rawQty = qtyIdx >= 0 ? parseFloat(String(row[qtyIdx]).replace(/"/g, "")) : NaN;
+            const lotSize = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : undefined;
+
+            parsedTrades.push({
+              id: `csv_${Date.now()}_${i}`,
+              instrument: String(row[instIdx]).replace(/"/g, "") || "UNKNOWN",
+              entryTime,
+              exitTime,
+              entryPrice,
+              exitPrice,
+              isLong,
+              pnl,
+              tags: ["Tradovate Import"],
+              modelTag: undefined,
+              lotSize,
+              notes: "",
+              strength: 0,
+              modelAdherence: 1,
+            });
+          });
+        } else if (importBroker === "robinhood") {
+          const activityIdx = lowerHeaders.indexOf("activity date");
+          const instrumentIdx = lowerHeaders.indexOf("instrument");
+          const descIdx = lowerHeaders.indexOf("description");
+          const transCodeIdx = lowerHeaders.indexOf("trans code");
+          const qtyIdx = lowerHeaders.indexOf("quantity");
+          const priceIdx = lowerHeaders.indexOf("price");
+          const amountIdx = lowerHeaders.indexOf("amount");
+
+          if (
+            activityIdx === -1 ||
+            instrumentIdx === -1 ||
+            transCodeIdx === -1 ||
+            qtyIdx === -1 ||
+            priceIdx === -1 ||
+            amountIdx === -1
+          ) {
+            throw new Error(
+              "Missing required columns. Ensure this is the Robinhood Activity CSV export (Activity Date, Instrument, Trans Code, Quantity, Price, Amount)."
+            );
+          }
+
+          const OPTIONS_TRANS_CODES = ["BTO", "STO", "STC", "BTC"];
+          const isFuturesSymbol = (sym: string) =>
+            /^\d*[A-Z]{1,5}\d*\/[A-Z0-9]+$/.test(sym) ||
+            /^(ES|NQ|MES|MNQ|CL|GC|ZB|ZN|RTY|YM|EMD|MCL|MGC)$/i.test(sym.trim());
+
+          type RobinhoodEvent = {
+            dateMs: number;
+            instrument: string;
+            description: string;
+            transCode: string;
+            qty: number;
+            price: number;
+            amount: number;
+            rowIndex: number;
+          };
+
+          const events: RobinhoodEvent[] = [];
+          rows.forEach((row, i) => {
+            const instrumentRaw = (row[instrumentIdx] ?? "").toString().trim();
+            const transCode = (row[transCodeIdx] ?? "").toString().trim().toUpperCase();
+            const description = (descIdx >= 0 ? row[descIdx] ?? "" : "").toString().trim().replace(/\s+/g, " ");
+            if (!instrumentRaw || !transCode) return;
+
+            const isOption = OPTIONS_TRANS_CODES.includes(transCode);
+            const isFutures = isFuturesSymbol(instrumentRaw);
+            if (!isOption && !isFutures) return;
+
+            const qty = parseFloat((row[qtyIdx] ?? "").toString().replace(/,/g, ""));
+            const price = parseFloat((row[priceIdx] ?? "").toString().replace(/[$,]/g, ""));
+            const amountStr = (row[amountIdx] ?? "").toString();
+            if (!amountStr || !Number.isFinite(qty) || qty <= 0) return;
+
+            const isNegative = amountStr.includes("(") && amountStr.includes(")");
+            const cleanAmount = parseFloat(amountStr.replace(/[^0-9.]/g, ""));
+            if (Number.isNaN(cleanAmount)) return;
+            const amount = isNegative ? -cleanAmount : cleanAmount;
+
+            const dateStr = (row[activityIdx] ?? "").toString().trim();
+            const dateMs = new Date(dateStr).getTime();
+            if (Number.isNaN(dateMs)) return;
+
+            events.push({
+              dateMs,
+              instrument: instrumentRaw,
+              description,
+              transCode,
+              qty,
+              price,
+              amount,
+              rowIndex: i,
+            });
+          });
+
+          events.sort((a, b) => a.dateMs - b.dateMs || a.rowIndex - b.rowIndex);
+
+          type Lot = { qty: number; price: number; amount: number; dateMs: number };
+          const longLotsByKey = new Map<string, Lot[]>();
+          const shortLotsByKey = new Map<string, Lot[]>();
+
+          const getPositionKey = (e: RobinhoodEvent) =>
+            e.description && /put|call|\d{1,2}\/\d{1,2}\/\d{2,4}|\$\d+/.test(e.description.toLowerCase())
+              ? `${e.instrument}|${e.description}`
+              : e.instrument;
+
+          const baseTime = Date.now();
+          events.forEach((e, idx) => {
+            const key = getPositionKey(e);
+            if (e.transCode === "BTO") {
+              const lots = longLotsByKey.get(key) ?? [];
+              lots.push({ qty: e.qty, price: e.price, amount: e.amount, dateMs: e.dateMs });
+              longLotsByKey.set(key, lots);
+            } else if (e.transCode === "STO") {
+              const lots = shortLotsByKey.get(key) ?? [];
+              lots.push({ qty: e.qty, price: e.price, amount: e.amount, dateMs: e.dateMs });
+              shortLotsByKey.set(key, lots);
+            } else if (e.transCode === "STC") {
+              let remaining = e.qty;
+              const lots = longLotsByKey.get(key) ?? [];
+              while (remaining > 1e-9 && lots.length > 0) {
+                const lot = lots[0];
+                const take = Math.min(lot.qty, remaining);
+                const entryAmount = (lot.amount / lot.qty) * take;
+                const exitAmount = (e.amount / e.qty) * take;
+                const realizedPnl = exitAmount - Math.abs(entryAmount);
+                parsedTrades.push({
+                  id: `csv_${baseTime}_${key.replace(/\|/g, "_")}_${idx}`,
+                  instrument: e.description || e.instrument,
+                  entryTime: lot.dateMs,
+                  exitTime: e.dateMs,
+                  entryPrice: lot.price,
+                  exitPrice: e.price,
+                  isLong: true,
+                  pnl: realizedPnl,
+                  tags: ["Robinhood Import"],
+                  modelTag: undefined,
+                  lotSize: take,
+                  notes: "",
+                  strength: 0,
+                  modelAdherence: 1,
+                });
+                remaining -= take;
+                lot.qty -= take;
+                if (lot.qty < 1e-9) lots.shift();
+              }
+              longLotsByKey.set(key, lots);
+            } else if (e.transCode === "BTC") {
+              let remaining = e.qty;
+              const lots = shortLotsByKey.get(key) ?? [];
+              while (remaining > 1e-9 && lots.length > 0) {
+                const lot = lots[0];
+                const take = Math.min(lot.qty, remaining);
+                const entryAmount = (lot.amount / lot.qty) * take;
+                const exitAmount = (e.amount / e.qty) * take;
+                const realizedPnl = Math.abs(entryAmount) - Math.abs(exitAmount);
+                parsedTrades.push({
+                  id: `csv_${baseTime}_${key.replace(/\|/g, "_")}_${idx}`,
+                  instrument: e.description || e.instrument,
+                  entryTime: lot.dateMs,
+                  exitTime: e.dateMs,
+                  entryPrice: lot.price,
+                  exitPrice: e.price,
+                  isLong: false,
+                  pnl: realizedPnl,
+                  tags: ["Robinhood Import"],
+                  modelTag: undefined,
+                  lotSize: take,
+                  notes: "",
+                  strength: 0,
+                  modelAdherence: 1,
+                });
+                remaining -= take;
+                lot.qty -= take;
+                if (lot.qty < 1e-9) lots.shift();
+              }
+              shortLotsByKey.set(key, lots);
+            }
           });
         }
 
+        if (!parsedTrades.length) {
+          throw new Error("No valid trades found in this CSV.");
+        }
+
         parsedTrades.sort((a, b) => a.entryTime - b.entryTime);
-        const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 })); // capital recomputed below after merge
+        const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 }));
 
         const isFirstImport = typeof window !== "undefined" && !localStorage.getItem(USER_HAS_IMPORTED_KEY);
 
         if (isFirstImport) {
-          // First time user imports: replace pre-populated/mock data with imported data only
           let runningCapital = 50000;
           const withCapital = parsedWithCapital.map((t) => {
             runningCapital += t.pnl;
@@ -1247,31 +1464,32 @@ export default function ClientApp() {
           const addedCount = parsedTrades.length;
           setImportStatus(`Successfully imported ${addedCount} trade(s). Pre-populated data cleared.`);
         } else {
-          // User has imported before: merge with existing data (do not clear previous user data)
           setTrades((prevTrades) => {
             const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
               `${t.instrument}|${t.entryTime}|${t.exitTime}`;
             const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
+            const brokerTag = importBroker === "tradovate" ? "Tradovate Import" : "Robinhood Import";
+
             const kept = prevTrades.filter(
-              (t) => !t.tags?.includes("Tradovate Import") || isCombined(t)
+              (t) => !t.tags?.includes(brokerTag) || isCombined(t)
             );
-            const existingTradovate = prevTrades.filter(
-              (t) => t.tags?.includes("Tradovate Import") && !isCombined(t)
+            const existingBrokerTrades = prevTrades.filter(
+              (t) => t.tags?.includes(brokerTag) && !isCombined(t)
             );
             const keysConsumedByCombined = new Set<string>(
               kept.flatMap((t) => (isCombined(t) && t.combinedFromKeys ? t.combinedFromKeys : []))
             );
-            const tradovateMap = new Map<string, (typeof parsedWithCapital)[0]>();
-            for (const t of existingTradovate) {
-              tradovateMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
+            const brokerMap = new Map<string, (typeof parsedWithCapital)[0]>();
+            for (const t of existingBrokerTrades) {
+              brokerMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
             }
             for (const t of parsedWithCapital) {
               const key = tradeKeyForMerge(t);
               if (keysConsumedByCombined.has(key)) continue;
-              tradovateMap.set(key, { ...t });
+              brokerMap.set(key, { ...t });
             }
-            const mergedTradovate = Array.from(tradovateMap.values());
-            const combined = [...kept, ...mergedTradovate].sort((a, b) => a.entryTime - b.entryTime);
+            const mergedBroker = Array.from(brokerMap.values());
+            const combined = [...kept, ...mergedBroker].sort((a, b) => a.entryTime - b.entryTime);
 
             let runningCapital = 50000;
             const withCapital = combined.map((t) => {
@@ -1373,7 +1591,17 @@ export default function ClientApp() {
     <div
       className={`hidden md:flex ${sidebarOpen ? "w-64" : "w-20"} transition-all duration-300 h-screen sticky top-0 bg-white/30 dark:bg-[#27272a] backdrop-blur-xl border-r border-white/50 dark:border-[#3f3f46] flex-col px-4 pb-[16px] pt-[16px] shrink-0 z-20`}
     >
-      <div className="flex flex-col gap-4 mb-8 mt-4">
+      <div className="flex justify-center pt-1 pb-2">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="p-2 text-gray-500 dark:text-[#a1a1aa] hover:text-[#2e2e2e] dark:hover:text-[#fafafa] transition-colors"
+          title="Toggle Sidebar"
+        >
+          {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
+        </button>
+      </div>
+      <div className="flex flex-col gap-4 mb-8 mt-2">
         <div className="w-full relative h-10 min-h-[2.5rem] flex items-center">
           {sidebarOpen ? (
             <div className="relative w-full h-full">
@@ -1445,30 +1673,15 @@ export default function ClientApp() {
             </button>
           )}
         </div>
-        <div className={`flex items-center gap-2 ${sidebarOpen ? "flex-row" : "flex-col"}`}>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            className="flex items-center justify-center w-11 h-11 shrink-0 rounded-xl bg-[#2e2e2e] text-white hover:bg-black transition-all shadow-md hover:shadow-lg dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]"
-          >
-            {isDark ? <LucideSun size={20} strokeWidth={2} /> : <LucideMoon size={20} strokeWidth={2} />}
-          </button>
-          <input
-            type="file"
-            accept=".csv"
-            onChange={handleCSVUpload}
-            className="hidden"
-            id="csv-upload-sidebar"
-          />
-          <label
-            htmlFor="csv-upload-sidebar"
-            className={`flex items-center flex-1 min-w-0 w-full ${sidebarOpen ? "justify-start px-4" : "justify-center"} py-3 bg-[#2e2e2e] text-white rounded-xl cursor-pointer hover:bg-black transition-all text-sm font-medium shadow-md hover:shadow-lg dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]`}
-          >
-            <Icons.Upload /> {sidebarOpen && <span className="ml-3 whitespace-nowrap">Import CSV</span>}
-          </label>
-        </div>
-        {importStatus && (
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          className="self-center p-2 text-gray-500 dark:text-[#a1a1aa] hover:text-[#2e2e2e] dark:hover:text-[#fafafa] transition-colors"
+        >
+          {isDark ? <LucideSun size={22} strokeWidth={2} /> : <LucideMoon size={22} strokeWidth={2} />}
+        </button>
+        {importStatus && activeTab !== "import" && (
           <div
             className={`absolute bottom-full left-0 w-full mb-2 z-50 bg-white/90 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center dark:bg-[#27272a] dark:border-[#3f3f46]`}
           >
@@ -1502,37 +1715,8 @@ export default function ClientApp() {
             aria-hidden
             onClick={() => setMobileMenuOpen(false)}
           />
-          <div className="fixed top-14 left-0 right-0 z-50 max-h-[calc(100vh-3.5rem)] overflow-y-auto md:hidden bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border-b border-white/60 dark:border-[#3f3f46] shadow-lg">
-            <nav className="flex flex-col p-4 gap-1">
-              {authReady && (
-                <div className="pb-3 mb-3 border-b border-white/50 dark:border-[#3f3f46]">
-                  {user ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        createSupabaseClient().auth.signOut();
-                        setMobileMenuOpen(false);
-                      }}
-                      className="flex items-center w-full px-4 py-2.5 rounded-xl bg-white/30 dark:bg-[#3f3f46] text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa]"
-                    >
-                      <LucideLogOut size={18} className="mr-3" /> {user.email ?? "Sign out"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        createSupabaseClient().auth.signInWithOAuth({
-                          provider: "google",
-                          options: { redirectTo: `${typeof window !== "undefined" ? window.location.origin : ""}/auth/callback` },
-                        });
-                      }}
-                      className="flex items-center w-full px-4 py-2.5 rounded-xl bg-[#2e2e2e] text-white text-sm font-medium dark:bg-[#3f3f46] dark:text-[#fafafa]"
-                    >
-                      <LucideLogIn size={18} className="mr-3" /> Sign in with Google
-                    </button>
-                  )}
-                </div>
-              )}
+          <div className="fixed top-14 left-0 right-0 z-50 max-h-[calc(100vh-3.5rem)] overflow-y-auto md:hidden bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border-b border-white/60 dark:border-[#3f3f46] shadow-lg flex flex-col">
+            <nav className="flex flex-col p-4 gap-1 flex-1 min-h-0">
               {NAV_ITEMS.map((item) => {
                 const IconComponent = item.icon;
                 return (
@@ -1552,41 +1736,118 @@ export default function ClientApp() {
                   </button>
                 );
               })}
-              <div className="pt-4 mt-2 border-t border-white/50 dark:border-[#3f3f46] relative">
-                <div className="flex items-center gap-2">
+              {authReady && (
+                <div className="flex items-center gap-2 pt-4 mt-4 border-t border-white/50 dark:border-[#3f3f46]">
+                  {user ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        createSupabaseClient().auth.signOut();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="flex items-center flex-1 min-w-0 px-4 py-2.5 rounded-xl bg-white/30 dark:bg-[#3f3f46] text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa]"
+                    >
+                      <LucideLogOut size={18} className="mr-3 shrink-0" /> <span className="truncate">{user.email ?? "Sign out"}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        createSupabaseClient().auth.signInWithOAuth({
+                          provider: "google",
+                          options: { redirectTo: `${typeof window !== "undefined" ? window.location.origin : ""}/auth/callback` },
+                        });
+                      }}
+                      className="flex items-center flex-1 min-w-0 px-4 py-2.5 rounded-xl bg-[#2e2e2e] text-white text-sm font-medium dark:bg-[#3f3f46] dark:text-[#fafafa]"
+                    >
+                      <LucideLogIn size={18} className="mr-3 shrink-0" /> Sign in with Google
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={toggleTheme}
                     aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-                    className="flex items-center justify-center w-11 h-11 shrink-0 rounded-xl bg-[#2e2e2e] text-white hover:bg-black transition-all shadow-md hover:shadow-lg dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]"
+                    className="flex items-center justify-center w-11 h-11 shrink-0 rounded-xl bg-[#2e2e2e] text-white hover:bg-black transition-all dark:bg-[#3f3f46] dark:hover:bg-[#52525b] dark:text-[#fafafa]"
                   >
                     {isDark ? <LucideSun size={20} strokeWidth={2} /> : <LucideMoon size={20} strokeWidth={2} />}
                   </button>
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleCSVUpload}
-                    className="hidden"
-                    id="csv-upload-mobile"
-                  />
-                  <label
-                    htmlFor="csv-upload-mobile"
-                    className="flex items-center flex-1 min-w-0 justify-start px-4 py-3 bg-[#2e2e2e] dark:bg-[#3f3f46] text-white dark:text-[#fafafa] rounded-xl cursor-pointer hover:bg-black dark:hover:bg-[#52525b] transition-all text-sm font-medium w-full"
-                  >
-                    <Icons.Upload /> <span className="ml-3">Import CSV</span>
-                  </label>
                 </div>
-                {importStatus && (
-                  <div className="absolute bottom-full left-4 right-4 mb-2 z-10 bg-white/95 dark:bg-[#27272a] backdrop-blur-md shadow-lg border border-white/60 dark:border-[#3f3f46] rounded-lg p-2 text-xs text-center">
-                    {importStatus}
-                  </div>
-                )}
-              </div>
+              )}
             </nav>
           </div>
         </>
       )}
     </>
+  );
+
+  const renderImportData = () => (
+    <div className="space-y-8 fade-in pb-12 max-w-2xl">
+      <div>
+        <h2 className="display-font text-4xl md:text-5xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight">Import Data</h2>
+        <p className="text-sm text-gray-500 dark:text-[#a1a1aa] mt-2">
+          Import your trade history from a broker CSV. Select your broker below, then choose your export file.
+        </p>
+      </div>
+
+      <div className="rounded-2xl bg-white/30 dark:bg-[#27272a] border border-white/50 dark:border-[#3f3f46] p-6 space-y-6">
+        <h3 className="text-lg font-semibold text-[#2e2e2e] dark:text-[#fafafa]">Instructions</h3>
+        <ul className="list-disc list-inside space-y-2 text-sm text-gray-600 dark:text-[#a1a1aa]">
+          <li>Export your account activity or trade history from your broker as a <strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">CSV file</strong>.</li>
+          <li>Choose the correct <strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Broker</strong> in the dropdown so we can parse the format correctly.</li>
+          <li><strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Tradovate:</strong> Use your platform&apos;s export (e.g. Account Performance) with columns such as Symbol, PnL, Bought/Sold Timestamp, Buy/Sell Price.</li>
+          <li><strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Robinhood:</strong> Use the Activity CSV export. Only options and futures trades (BTO, STO, STC, BTC) are imported; buys and sells are grouped into full round-trip trades (FIFO).</li>
+          <li>After importing, your first import replaces any demo data; later imports are merged with your existing trades.</li>
+        </ul>
+
+        <div className="flex flex-col gap-4 pt-2">
+          <label htmlFor="import-broker-select" className="text-sm font-medium text-[#2e2e2e] dark:text-[#e5e7eb]">
+            Broker
+          </label>
+          <select
+            id="import-broker-select"
+            value={importBroker}
+            onChange={(ev) =>
+              setImportBroker(ev.target.value === "robinhood" ? "robinhood" : "tradovate")
+            }
+            className="w-full max-w-xs rounded-xl border border-white/60 dark:border-[#3f3f46] bg-white/50 dark:bg-[#3f3f46] px-4 py-3 text-[#111827] dark:text-[#e5e7eb] focus:outline-none focus:ring-2 focus:ring-[#98935c]"
+          >
+            <option value="tradovate">Tradovate</option>
+            <option value="robinhood">Robinhood</option>
+          </select>
+
+          <div>
+            <label htmlFor="csv-upload-page" className="text-sm font-medium text-[#2e2e2e] dark:text-[#e5e7eb] block mb-2">
+              CSV file
+            </label>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleCSVUpload}
+              className="hidden"
+              id="csv-upload-page"
+            />
+            <label
+              htmlFor="csv-upload-page"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[#2e2e2e] dark:bg-[#3f3f46] text-white dark:text-[#fafafa] cursor-pointer hover:bg-black dark:hover:bg-[#52525b] transition-all text-sm font-medium shadow-md"
+            >
+              <Icons.Upload /> Choose file
+            </label>
+          </div>
+
+          {importStatus && (
+            <div
+              className={`rounded-xl px-4 py-3 text-sm ${
+                importStatus.startsWith("Error")
+                  ? "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200"
+                  : "bg-[#98935c]/15 dark:bg-[#98935c]/20 text-[#2e2e2e] dark:text-[#e5e7eb]"
+              }`}
+            >
+              {importStatus}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 
   const renderDashboard = () => (
@@ -2408,14 +2669,8 @@ export default function ClientApp() {
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {renderMobileNav()}
         <main className="flex-1 min-h-0 p-4 pt-14 sm:p-6 sm:pt-14 md:p-8 md:pt-8 lg:p-12 lg:pt-12 overflow-y-auto relative">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="hidden md:block absolute top-3 left-3 z-10 p-1 rounded-md hover:bg-white/50 text-gray-500 transition-colors shrink-0 bg-white/30 backdrop-blur-sm"
-            title="Toggle Sidebar"
-          >
-            {sidebarOpen ? <Icons.ChevronLeft /> : <Icons.ChevronRight />}
-          </button>
           {activeTab === "dashboard" && renderDashboard()}
+          {activeTab === "import" && renderImportData()}
           {activeTab === "recap" && renderDailyRecap()}
           {activeTab === "calendar" && (
             <CalendarView
