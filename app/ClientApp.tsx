@@ -1302,9 +1302,10 @@ export default function ClientApp() {
           }
 
           const OPTIONS_TRANS_CODES = ["BTO", "STO", "STC", "BTC"];
+          const FUTURES_BUY_SELL = ["BUY", "SELL"];
           const isFuturesSymbol = (sym: string) =>
             /^\d*[A-Z]{1,5}\d*\/[A-Z0-9]+$/.test(sym) ||
-            /^(ES|NQ|MES|MNQ|CL|GC|ZB|ZN|RTY|YM|EMD|MCL|MGC)$/i.test(sym.trim());
+            /^(ES|NQ|MES|MNQ|CL|GC|ZB|ZN|RTY|YM|EMD|MCL|MGC|MESZ4|ESH5|NQZ4)$/i.test(sym.trim());
 
           type RobinhoodEvent = {
             dateMs: number;
@@ -1315,6 +1316,7 @@ export default function ClientApp() {
             price: number;
             amount: number;
             rowIndex: number;
+            isFutures: boolean;
           };
 
           const events: RobinhoodEvent[] = [];
@@ -1326,7 +1328,8 @@ export default function ClientApp() {
 
             const isOption = OPTIONS_TRANS_CODES.includes(transCode);
             const isFutures = isFuturesSymbol(instrumentRaw);
-            if (!isOption && !isFutures) return;
+            const isFuturesBuySell = isFutures && FUTURES_BUY_SELL.includes(transCode);
+            if (!isOption && !isFuturesBuySell) return;
 
             const qty = parseFloat((row[qtyIdx] ?? "").toString().replace(/,/g, ""));
             const price = parseFloat((row[priceIdx] ?? "").toString().replace(/[$,]/g, ""));
@@ -1351,6 +1354,7 @@ export default function ClientApp() {
               price,
               amount,
               rowIndex: i,
+              isFutures,
             });
           });
 
@@ -1361,22 +1365,26 @@ export default function ClientApp() {
           const shortLotsByKey = new Map<string, Lot[]>();
 
           const getPositionKey = (e: RobinhoodEvent) =>
-            e.description && /put|call|\d{1,2}\/\d{1,2}\/\d{2,4}|\$\d+/.test(e.description.toLowerCase())
+            !e.isFutures && e.description && /put|call|\d{1,2}\/\d{1,2}\/\d{2,4}|\$\d+/.test(e.description.toLowerCase())
               ? `${e.instrument}|${e.description}`
               : e.instrument;
 
           const baseTime = Date.now();
           events.forEach((e, idx) => {
             const key = getPositionKey(e);
-            if (e.transCode === "BTO") {
+            const openLong = e.transCode === "BTO" || (e.isFutures && e.transCode === "BUY");
+            const openShort = e.transCode === "STO";
+            const closeLong = e.transCode === "STC" || (e.isFutures && e.transCode === "SELL");
+            const closeShort = e.transCode === "BTC";
+            if (openLong) {
               const lots = longLotsByKey.get(key) ?? [];
               lots.push({ qty: e.qty, price: e.price, amount: e.amount, dateMs: e.dateMs });
               longLotsByKey.set(key, lots);
-            } else if (e.transCode === "STO") {
+            } else if (openShort) {
               const lots = shortLotsByKey.get(key) ?? [];
               lots.push({ qty: e.qty, price: e.price, amount: e.amount, dateMs: e.dateMs });
               shortLotsByKey.set(key, lots);
-            } else if (e.transCode === "STC") {
+            } else if (closeLong) {
               let remaining = e.qty;
               const lots = longLotsByKey.get(key) ?? [];
               while (remaining > 1e-9 && lots.length > 0) {
@@ -1406,7 +1414,7 @@ export default function ClientApp() {
                 if (lot.qty < 1e-9) lots.shift();
               }
               longLotsByKey.set(key, lots);
-            } else if (e.transCode === "BTC") {
+            } else if (closeShort) {
               let remaining = e.qty;
               const lots = shortLotsByKey.get(key) ?? [];
               while (remaining > 1e-9 && lots.length > 0) {
@@ -2225,7 +2233,7 @@ export default function ClientApp() {
                   {trade.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="px-3 py-1 bg-white/50 dark:bg-[#a1a1aa] rounded-full text-xs font-medium border border-gray-200 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa]"
+                      className="px-3 py-1 bg-white/50 dark:bg-[#a1a1aa] rounded-full text-xs font-medium border border-gray-200 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[var(--color-black)]"
                     >
                       {tag}
                     </span>
