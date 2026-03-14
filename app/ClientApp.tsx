@@ -145,11 +145,14 @@ function useIsMobile(): boolean {
   return isMobile;
 }
 
-/** Normalize futures symbol for display: ESM4, MESH6, ESH6 -> ES; NQM4, MNQH6, NQH6 -> NQ; etc. */
+/** Normalize futures symbol for display: preserve Micro (MES/MNQ) vs Mini (ES/NQ). ESM4->ES, MESH6->MES, etc. */
 function formatSymbolDisplay(symbol: string): string {
   const s = (symbol || "").trim();
-  if (/^M?ES/i.test(s)) return "ES";
-  if (/^M?NQ/i.test(s)) return "NQ";
+  // Check Micro (MES, MNQ) before Mini (ES, NQ) so we don't collapse MES->ES.
+  if (/^MES/i.test(s)) return "MES";
+  if (/^MNQ/i.test(s)) return "MNQ";
+  if (/^ES/i.test(s)) return "ES";
+  if (/^NQ/i.test(s)) return "NQ";
   const root = s.replace(/[FGHJKMNQUVXZ]\d?$/i, "").slice(0, 3).toUpperCase();
   return root || s;
 }
@@ -813,7 +816,8 @@ export default function ClientApp() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
-  const [dashboardScoreTooltipOpen, setDashboardScoreTooltipOpen] = useState(false);
+  type DashboardStatId = "score" | "profitFactor" | "discipline" | "winLoss";
+  const [dashboardStatTooltip, setDashboardStatTooltip] = useState<DashboardStatId | null>(null);
 
   // Auth: session user or null; authReady when we've checked session once.
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
@@ -1225,7 +1229,12 @@ export default function ClientApp() {
           const soldIdx = lowerHeaders.indexOf("soldtimestamp");
           const buyPriceIdx = lowerHeaders.indexOf("buyprice");
           const sellPriceIdx = lowerHeaders.indexOf("sellprice");
-          const qtyIdx = lowerHeaders.findIndex((h) => /quantity|qty|contracts|size/.test(h.trim()));
+          // Prefer columns that mean "number of contracts"; exclude "contract size" (often 0.25 multiplier for MES).
+          const qtyIdx = lowerHeaders.findIndex((h) => {
+            const t = h.trim();
+            if (/contract\s*size|contractsize/.test(t)) return false;
+            return /quantity|^qty$|contracts|^size$|positionsize/.test(t);
+          });
 
           if (
             pnlIdx === -1 ||
@@ -1870,12 +1879,12 @@ export default function ClientApp() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div
           className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]"
-          onMouseEnter={() => !isMobile && setDashboardScoreTooltipOpen(true)}
-          onMouseLeave={() => !isMobile && setDashboardScoreTooltipOpen(false)}
-          onClick={() => isMobile && setDashboardScoreTooltipOpen((o) => !o)}
+          onMouseEnter={() => !isMobile && setDashboardStatTooltip("score")}
+          onMouseLeave={() => !isMobile && setDashboardStatTooltip(null)}
+          onClick={() => isMobile && setDashboardStatTooltip((id) => (id === "score" ? null : "score"))}
           role={isMobile ? "button" : undefined}
           tabIndex={isMobile ? 0 : undefined}
-          onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardScoreTooltipOpen((o) => !o); } } : undefined}
+          onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardStatTooltip((id) => (id === "score" ? null : "score")); } } : undefined}
         >
           <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Trader Score
@@ -1897,7 +1906,7 @@ export default function ClientApp() {
           )}
           <div
             className={`absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 z-50 transition-all duration-200 ${
-              dashboardScoreTooltipOpen ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
+              dashboardStatTooltip === "score" ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
             }`}
           >
             <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
@@ -1929,9 +1938,20 @@ export default function ClientApp() {
           </div>
         </div>
 
-        <div className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]">
+        <div
+          className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]"
+          onMouseEnter={() => !isMobile && setDashboardStatTooltip("profitFactor")}
+          onMouseLeave={() => !isMobile && setDashboardStatTooltip(null)}
+          onClick={() => isMobile && setDashboardStatTooltip((id) => (id === "profitFactor" ? null : "profitFactor"))}
+          role={isMobile ? "button" : undefined}
+          tabIndex={isMobile ? 0 : undefined}
+          onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardStatTooltip((id) => (id === "profitFactor" ? null : "profitFactor")); } } : undefined}
+        >
           <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Profit Factor
+            {isMobile && (
+              <span className="ml-1.5 text-gray-400 font-normal">(tap for details)</span>
+            )}
           </div>
           <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {(metrics?.profitFactor ?? 0).toFixed(2)}
@@ -1947,7 +1967,11 @@ export default function ClientApp() {
               {Math.abs(metrics.trends?.profitFactor ?? 0).toFixed(2)} VS PRIOR 30D
             </div>
           )}
-          <div className="absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+          <div
+            className={`absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 z-50 transition-all duration-200 ${
+              dashboardStatTooltip === "profitFactor" ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
+            }`}
+          >
             <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Calculation
             </h4>
@@ -1961,9 +1985,20 @@ export default function ClientApp() {
           </div>
         </div>
 
-        <div className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]">
+        <div
+          className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]"
+          onMouseEnter={() => !isMobile && setDashboardStatTooltip("discipline")}
+          onMouseLeave={() => !isMobile && setDashboardStatTooltip(null)}
+          onClick={() => isMobile && setDashboardStatTooltip((id) => (id === "discipline" ? null : "discipline"))}
+          role={isMobile ? "button" : undefined}
+          tabIndex={isMobile ? 0 : undefined}
+          onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardStatTooltip((id) => (id === "discipline" ? null : "discipline")); } } : undefined}
+        >
           <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Discipline Index
+            {isMobile && (
+              <span className="ml-1.5 text-gray-400 font-normal">(tap for details)</span>
+            )}
           </div>
           <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {(metrics?.disciplineScore ?? 0).toFixed(0)}%
@@ -1979,7 +2014,11 @@ export default function ClientApp() {
               {Math.abs(metrics.trends?.disciplineScore ?? 0).toFixed(0)}% VS PRIOR 30D
             </div>
           )}
-          <div className="absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+          <div
+            className={`absolute top-[105%] left-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 z-50 transition-all duration-200 ${
+              dashboardStatTooltip === "discipline" ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
+            }`}
+          >
             <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Measurement
             </h4>
@@ -1994,14 +2033,29 @@ export default function ClientApp() {
           </div>
         </div>
 
-        <div className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]">
+        <div
+          className="flex flex-col p-6 bg-white/30 dark:bg-[#27272a] rounded-[2rem] relative group cursor-help transition-colors hover:bg-white/40 dark:hover:bg-[#3f3f46]"
+          onMouseEnter={() => !isMobile && setDashboardStatTooltip("winLoss")}
+          onMouseLeave={() => !isMobile && setDashboardStatTooltip(null)}
+          onClick={() => isMobile && setDashboardStatTooltip((id) => (id === "winLoss" ? null : "winLoss"))}
+          role={isMobile ? "button" : undefined}
+          tabIndex={isMobile ? 0 : undefined}
+          onKeyDown={isMobile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDashboardStatTooltip((id) => (id === "winLoss" ? null : "winLoss")); } } : undefined}
+        >
           <div className="text-[10px] font-semibold text-gray-500 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3">
             Win / Loss Ratio
+            {isMobile && (
+              <span className="ml-1.5 text-gray-400 font-normal">(tap for details)</span>
+            )}
           </div>
           <div className="display-font text-7xl text-[#2e2e2e] dark:text-[#fafafa] tracking-tight leading-none transition-colors duration-300 group-hover:text-[#98935c]">
             {metrics ? `${(metrics.winLossRatio as number).toFixed(0)}%` : "--"}
           </div>
-          <div className="absolute top-[105%] right-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 transform translate-y-2 group-hover:translate-y-0">
+          <div
+            className={`absolute top-[105%] right-0 w-64 bg-white/95 dark:bg-[#27272a] backdrop-blur-xl border border-white/80 dark:border-[#3f3f46] shadow-[0_8px_32px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl p-5 z-50 transition-all duration-200 ${
+              dashboardStatTooltip === "winLoss" ? "opacity-100 visible translate-y-0" : "opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0"
+            }`}
+          >
             <h4 className="text-[10px] font-bold text-gray-400 dark:text-[#a1a1aa] uppercase tracking-[0.2em] mb-3 border-b border-gray-200 dark:border-[#3f3f46] pb-2">
               Measurement
             </h4>
@@ -2198,75 +2252,80 @@ export default function ClientApp() {
 
     return (
       <div className="flex flex-col gap-8 fade-in">
-        <div className="space-y-6">
-          <h2 className="display-font text-5xl mb-6 text-[#2e2e2e] dark:text-[#fafafa]">Daily Recap</h2>
-          {recapDate && (
-            <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] -mt-2">
-              Showing recap for {new Date(recapDate).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
-            </p>
-          )}
-          {recapTrades.length === 0 ? (
-            <GlassCard>
-              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades recorded yet.</p>
-            </GlassCard>
-          ) : (
-            recapTrades.map((trade) => (
-              <GlassCard
-                key={trade.id}
-                className={`cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${trade.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
-                onClick={() => setSelectedTrade(trade)}
-              >
-                <div className="flex justify-between items-center mb-4">
-                  <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(trade.instrument)}</span>
-                  <span
-                    className="font-medium"
-                    style={{ color: trade.pnl >= 0 ? COLORS.profit : COLORS.loss }}
-                  >
-                    {formatPnl(trade.pnl, 2)}
-                  </span>
-                </div>
-                <div className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] mb-4">
-                  {new Date(trade.entryTime).toLocaleTimeString()} -{" "}
-                  {new Date(trade.exitTime).toLocaleTimeString()}
-                </div>
-                <div className="flex gap-2 mb-4">
-                  {trade.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-3 py-1 bg-white/50 dark:bg-[#a1a1aa] rounded-full text-xs font-medium border border-gray-200 dark:border-[#3f3f46] text-[#2e2e2e] dark:text-[var(--color-black)]"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-4 pt-4 border-t border-white/50 dark:border-[#3f3f46] flex items-center gap-4">
-                  <span className="text-xs font-medium uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa]">
-                    Trade Strength:
-                  </span>
-                  <StrengthMeter
-                    value={trade.strength}
-                    onChange={(val) =>
-                      setTrades(trades.map((t) => (t.id === trade.id ? { ...t, strength: val } : t)))
-                    }
-                  />
-                </div>
+        <h2 className="display-font text-5xl mb-6 text-[#2e2e2e] dark:text-[#fafafa]">Daily Recap</h2>
+        {recapDate && (
+          <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] -mt-2 mb-2">
+            Showing recap for {new Date(recapDate).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
+          </p>
+        )}
+        {/* Desktop: 40% Flow Lab left, 60% Trades right. Mobile: stacked (trades then Flow Lab). */}
+        <div className="flex flex-col md:grid md:grid-cols-[40%_1fr] md:gap-8 gap-6 md:items-start">
+          <div className="w-full min-w-0 order-2 md:order-1">
+            <AICoachPanel
+              metrics={metrics}
+              trades={recapTrades}
+              onPushNote={(note, tradeId) => {
+                if (!tradeId && recapTrades.length > 0) tradeId = recapTrades[0].id;
+                if (tradeId)
+                  setTrades(
+                    trades.map((t) =>
+                      t.id === tradeId ? { ...t, notes: t.notes + "\n\nAI Coach: " + note } : t
+                    )
+                  );
+              }}
+            />
+          </div>
+          <div className="space-y-6 w-full min-w-0 order-1 md:order-2">
+            {recapTrades.length === 0 ? (
+              <GlassCard>
+                <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No trades recorded yet.</p>
               </GlassCard>
-            ))
-          )}
+            ) : (
+              recapTrades.map((trade) => (
+                <GlassCard
+                  key={trade.id}
+                  className={`cursor-pointer border border-transparent hover:bg-white/50 dark:hover:bg-[#3f3f46] transition-colors ${trade.pnl >= 0 ? "hover:border-[#42bda8]/30" : "hover:border-[#f43636]/30"}`}
+                  onClick={() => setSelectedTrade(trade)}
+                >
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="font-semibold text-lg text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(trade.instrument)}</span>
+                    <span
+                      className="font-medium"
+                      style={{ color: trade.pnl >= 0 ? COLORS.profit : COLORS.loss }}
+                    >
+                      {formatPnl(trade.pnl, 2)}
+                    </span>
+                  </div>
+                  <div className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] mb-4">
+                    {new Date(trade.entryTime).toLocaleTimeString()} -{" "}
+                    {new Date(trade.exitTime).toLocaleTimeString()}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-4 min-w-0">
+                    {trade.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex flex-shrink-0 items-center px-3 py-1 rounded-full text-xs font-medium border border-gray-200 dark:border-[#3f3f46] bg-white/50 dark:bg-[#a1a1aa] text-[#2e2e2e] dark:text-[var(--color-black)] whitespace-nowrap"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-white/50 dark:border-[#3f3f46] flex items-center gap-4">
+                    <span className="text-xs font-medium uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa]">
+                      Trade Strength:
+                    </span>
+                    <StrengthMeter
+                      value={trade.strength}
+                      onChange={(val) =>
+                        setTrades(trades.map((t) => (t.id === trade.id ? { ...t, strength: val } : t)))
+                      }
+                    />
+                  </div>
+                </GlassCard>
+              ))
+            )}
+          </div>
         </div>
-        <AICoachPanel
-          metrics={metrics}
-          trades={recapTrades}
-          onPushNote={(note, tradeId) => {
-            if (!tradeId && recapTrades.length > 0) tradeId = recapTrades[0].id;
-            if (tradeId)
-              setTrades(
-                trades.map((t) =>
-                  t.id === tradeId ? { ...t, notes: t.notes + "\n\nAI Coach: " + note } : t
-                )
-              );
-          }}
-        />
       </div>
     );
   };
@@ -2718,6 +2777,11 @@ export default function ClientApp() {
             const set = new Set<string>();
             trades.forEach((t) => t.tags.forEach((tag) => set.add(tag)));
             return [...set].sort();
+          })()}
+          tagCounts={(() => {
+            const counts: Record<string, number> = {};
+            trades.forEach((t) => t.tags.forEach((tag) => { counts[tag] = (counts[tag] ?? 0) + 1; }));
+            return counts;
           })()}
           modelTags={models.map((m) => m.name)}
           onClose={() => setSelectedTrade(null)}
@@ -3313,12 +3377,14 @@ const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/web
 const TradeDetailsModal = ({
   trade,
   allTags,
+  tagCounts = {},
   modelTags,
   onClose,
   onSave,
 }: {
   trade: Trade;
   allTags: string[];
+  tagCounts?: Record<string, number>;
   modelTags: string[];
   onClose: () => void;
   onSave: (t: Trade) => void;
@@ -3332,14 +3398,20 @@ const TradeDetailsModal = ({
   );
   const [isDragging, setIsDragging] = useState(false);
   const [tagDropdownOpen, setTagDropdownOpen] = useState(false);
+  const [showAllTags, setShowAllTags] = useState(false);
   const [customTagInput, setCustomTagInput] = useState("");
   const [sessionCustomTags, setSessionCustomTags] = useState<Set<string>>(new Set());
   const [chartLightboxOpen, setChartLightboxOpen] = useState(false);
   const [chartLightboxIndex, setChartLightboxIndex] = useState(0);
   const [strength, setStrength] = useState(trade.strength);
+  const [editingNotes, setEditingNotes] = useState(!(trade.notes ?? "").trim());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tagDropdownRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setNotes(trade.notes);
+    setEditingNotes(!(trade.notes ?? "").trim());
+  }, [trade.id, trade.notes]);
   useEffect(() => {
     setStrength(trade.strength);
   }, [trade.id, trade.strength]);
@@ -3349,13 +3421,20 @@ const TradeDetailsModal = ({
 
   const recentTags = useMemo(() => {
     const pool = new Set<string>([...allTags, ...sessionCustomTags]);
-    return [...pool].filter((t) => !tags.includes(t)).sort();
-  }, [allTags, sessionCustomTags, tags]);
+    const list = [...pool].filter((t) => !tags.includes(t));
+    return list.sort((a, b) => {
+      const countA = tagCounts[a] ?? 0;
+      const countB = tagCounts[b] ?? 0;
+      if (countB !== countA) return countB - countA;
+      return a.localeCompare(b);
+    });
+  }, [allTags, sessionCustomTags, tags, tagCounts]);
 
   const addTag = (tag: string) => {
     const trimmed = tag.trim();
     if (!trimmed || tags.includes(trimmed)) {
       setTagDropdownOpen(false);
+      setShowAllTags(false);
       setCustomTagInput("");
       return;
     }
@@ -3364,13 +3443,17 @@ const TradeDetailsModal = ({
     }
     setTags((prev) => [...prev, trimmed]);
     setTagDropdownOpen(false);
+    setShowAllTags(false);
     setCustomTagInput("");
   };
   const removeTag = (tag: string) => setTags((prev) => prev.filter((t) => t !== tag));
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) setTagDropdownOpen(false);
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+        setTagDropdownOpen(false);
+        setShowAllTags(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -3675,20 +3758,31 @@ const TradeDetailsModal = ({
                 </button>
               </div>
               {tagDropdownOpen && (
-                <div className="absolute left-0 bottom-full mb-2 w-56 max-h-48 overflow-y-auto bg-white/95 backdrop-blur border border-white/60 rounded-xl shadow-lg z-10 py-2">
+                <div
+                  className={`absolute left-0 bottom-full mb-2 w-56 overflow-y-auto bg-white/95 dark:bg-[#27272a] backdrop-blur border border-white/60 dark:border-[#3f3f46] rounded-xl shadow-lg z-10 py-2 ${showAllTags ? "max-h-[min(16rem,60vh)]" : "max-h-[14rem]"}`}
+                >
                   {recentTags.length > 0 && (
                     <>
-                      {recentTags.slice(0, 12).map((tag) => (
+                      {(showAllTags ? recentTags : recentTags.slice(0, 5)).map((tag) => (
                         <button
                           key={tag}
                           type="button"
                           onClick={() => addTag(tag)}
-                          className="w-full text-left px-4 py-2 text-sm font-medium text-[#2e2e2e] hover:bg-[#98935c]/10 focus:outline-none"
+                          className="w-full text-left px-4 py-2 text-sm font-medium text-[#2e2e2e] dark:text-[#fafafa] hover:bg-[#98935c]/10 dark:hover:bg-[#98935c]/20 focus:outline-none"
                         >
                           {tag}
                         </button>
                       ))}
-                      <div className="border-t border-gray-200 my-1" />
+                      {recentTags.length > 5 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllTags((v) => !v)}
+                          className="w-full text-left px-4 py-2 text-xs font-semibold uppercase tracking-widest text-[#98935c] hover:bg-[#98935c]/10 dark:hover:bg-[#98935c]/20 focus:outline-none"
+                        >
+                          {showAllTags ? "Show less" : "Show all"}
+                        </button>
+                      )}
+                      <div className="border-t border-gray-200 dark:border-[#3f3f46] my-1" />
                     </>
                   )}
                   <div className="px-4 py-2">
@@ -3708,7 +3802,7 @@ const TradeDetailsModal = ({
                     <button
                       type="button"
                       onClick={() => addTag(customTagInput)}
-                      className="mt-2 w-full py-1.5 text-xs font-semibold uppercase tracking-widest text-[#98935c] hover:text-black"
+                      className="mt-2 w-full py-1.5 text-xs font-semibold uppercase tracking-widest text-[#98935c] hover:text-black dark:hover:text-[#fafafa]"
                     >
                       Add custom
                     </button>
@@ -3727,18 +3821,33 @@ const TradeDetailsModal = ({
           aria-hidden
           multiple
         />
-        {/* Trade notes full width below */}
+        {/* Trade notes: locked (read-only + Edit) when saved, else editable textarea */}
         <div className="mb-6">
           <label className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2 block">
             Trade Notes & Coach Feedback
           </label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full min-h-[120px] max-h-[250px] resize-y bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-4 focus:outline-none text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa]"
-            placeholder="Record emotional state and technical observations..."
-            style={{ resize: "vertical" }}
-          />
+          {(trade.notes ?? "").trim() && !editingNotes ? (
+            <div className="flex flex-col gap-2">
+              <div className="rounded-xl bg-white/30 dark:bg-[#3f3f46]/50 border border-white/60 dark:border-[#3f3f46] p-4 text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa] whitespace-pre-wrap">
+                {trade.notes}
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingNotes(true)}
+                className="self-start px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-widest text-[#98935c] hover:bg-[#98935c]/10 dark:hover:bg-[#98935c]/20 transition-colors"
+              >
+                Edit
+              </button>
+            </div>
+          ) : (
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full min-h-[120px] max-h-[250px] resize-y bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-4 focus:outline-none text-sm font-light leading-relaxed text-[#2e2e2e] dark:text-[#fafafa]"
+              placeholder="Record emotional state and technical observations..."
+              style={{ resize: "vertical" }}
+            />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
