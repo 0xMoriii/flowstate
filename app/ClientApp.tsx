@@ -838,7 +838,7 @@ export default function ClientApp() {
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
   const [coachFocusedTrade, setCoachFocusedTrade] = useState<ReturnType<typeof generateMockTrades>[number] | null>(null);
   const [importStatus, setImportStatus] = useState("");
-  const [importBroker, setImportBroker] = useState<"tradovate" | "robinhood">("tradovate");
+  const [importBroker, setImportBroker] = useState<"tradovate" | "robinhood" | "deepcharts">("tradovate");
   const [quote, setQuote] = useState(MARK_DOUGLAS_QUOTES[0]);
   useEffect(() => {
     setQuote(MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]);
@@ -1140,7 +1140,7 @@ export default function ClientApp() {
     setEditingModelId((prev) => (prev === id ? null : prev));
   };
 
-  const parseCsvText = (text: string): { headers: string[]; rows: string[][] } => {
+  const parseCsvText = (text: string, delimiter: string = ","): { headers: string[]; rows: string[][] } => {
     const rows: string[][] = [];
     let current: string[] = [];
     let field = "";
@@ -1166,7 +1166,7 @@ export default function ClientApp() {
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (ch === "," && !inQuotes) {
+      } else if (ch === delimiter && !inQuotes) {
         pushField();
       } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
         if (field !== "" || current.length > 0) {
@@ -1191,14 +1191,14 @@ export default function ClientApp() {
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const brokerLabel = importBroker === "tradovate" ? "Tradovate" : "Robinhood";
+    const brokerLabel = importBroker === "tradovate" ? "Tradovate" : importBroker === "robinhood" ? "Robinhood" : "DeepCharts";
     setImportStatus(`Parsing ${brokerLabel} CSV...`);
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const text = (event.target?.result as string) ?? "";
-        const { headers, rows } = parseCsvText(text);
+        const { headers, rows } = parseCsvText(text, importBroker === "deepcharts" ? ";" : ",");
         if (!headers.length || !rows.length) throw new Error("File empty or missing data rows.");
 
         type ParsedTrade = {
@@ -1455,6 +1455,71 @@ export default function ClientApp() {
               shortLotsByKey.set(key, lots);
             }
           });
+        } else if (importBroker === "deepcharts") {
+          const instIdx = lowerHeaders.findIndex((h) => h === "symbol");
+          const contractIdx = lowerHeaders.findIndex((h) => h === "contract");
+          const entryDateIdx = lowerHeaders.findIndex((h) => h === "entry date");
+          const exitDateIdx = lowerHeaders.findIndex((h) => h === "exit date");
+          const entryPriceIdx = lowerHeaders.findIndex((h) => h === "entry price");
+          const exitPriceIdx = lowerHeaders.findIndex((h) => h === "exit price");
+          const sideIdx = lowerHeaders.findIndex((h) => h === "side");
+          const qtyIdx = lowerHeaders.findIndex((h) => h === "quantity");
+          const pnlIdx = lowerHeaders.findIndex((h) => h === "net p/l");
+
+          if (
+            entryDateIdx === -1 ||
+            exitDateIdx === -1 ||
+            entryPriceIdx === -1 ||
+            exitPriceIdx === -1 ||
+            sideIdx === -1 ||
+            qtyIdx === -1 ||
+            pnlIdx === -1
+          ) {
+            throw new Error(
+              "Missing required columns. Ensure this is a DeepCharts export."
+            );
+          }
+
+          rows.forEach((row, i) => {
+            if (row.length < headers.length) return;
+            // The user requested to use the symbol column.
+            const instrumentRaw = String(row[instIdx] || row[contractIdx] || "UNKNOWN").replace(/"/g, "").trim();
+            const side = String(row[sideIdx]).toUpperCase().trim();
+            
+            const rawPnl = row[pnlIdx] ?? "";
+            const isNegative = rawPnl.includes("(") && rawPnl.includes(")");
+            const cleanPnl = parseFloat(String(rawPnl).replace(/[^0-9.-]/g, ""));
+            if (Number.isNaN(cleanPnl)) return;
+            const pnl = isNegative ? -Math.abs(cleanPnl) : cleanPnl;
+
+            const t1 = new Date(String(row[entryDateIdx]).replace(/"/g, "")).getTime();
+            const t2 = new Date(String(row[exitDateIdx]).replace(/"/g, "")).getTime();
+            if (Number.isNaN(t1) || Number.isNaN(t2)) return;
+
+            const entryPrice = parseFloat(String(row[entryPriceIdx]));
+            const exitPrice = parseFloat(String(row[exitPriceIdx]));
+
+            const rawQty = parseFloat(String(row[qtyIdx]).replace(/"/g, ""));
+            const lotSize = Number.isFinite(rawQty) ? Math.abs(rawQty) : undefined;
+            const isLong = side === "BUY";
+
+            parsedTrades.push({
+              id: `csv_${Date.now()}_deepcharts_${i}`,
+              instrument: instrumentRaw,
+              entryTime: Math.min(t1, t2),
+              exitTime: Math.max(t1, t2),
+              entryPrice,
+              exitPrice,
+              isLong,
+              pnl,
+              tags: ["DeepCharts Import"],
+              modelTag: undefined,
+              lotSize,
+              notes: "",
+              strength: 0,
+              modelAdherence: 1,
+            });
+          });
         }
 
         if (!parsedTrades.length) {
@@ -1485,7 +1550,12 @@ export default function ClientApp() {
             const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
               `${t.instrument}|${t.entryTime}|${t.exitTime}`;
             const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
-            const brokerTag = importBroker === "tradovate" ? "Tradovate Import" : "Robinhood Import";
+            const brokerTag =
+              importBroker === "tradovate"
+                ? "Tradovate Import"
+                : importBroker === "robinhood"
+                ? "Robinhood Import"
+                : "DeepCharts Import";
 
             const kept = prevTrades.filter(
               (t) => !t.tags?.includes(brokerTag) || isCombined(t)
@@ -1824,12 +1894,13 @@ export default function ClientApp() {
             id="import-broker-select"
             value={importBroker}
             onChange={(ev) =>
-              setImportBroker(ev.target.value === "robinhood" ? "robinhood" : "tradovate")
+              setImportBroker(ev.target.value as any)
             }
             className="w-full max-w-xs rounded-xl border border-white/60 dark:border-[#3f3f46] bg-white/50 dark:bg-[#3f3f46] px-4 py-3 text-[#111827] dark:text-[#e5e7eb] focus:outline-none focus:ring-2 focus:ring-[#98935c]"
           >
             <option value="tradovate">Tradovate</option>
             <option value="robinhood">Robinhood</option>
+            <option value="deepcharts">DeepCharts</option>
           </select>
 
           <div>
