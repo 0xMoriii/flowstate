@@ -838,6 +838,7 @@ export default function ClientApp() {
   const [selectedTrade, setSelectedTrade] = useState<(typeof trades)[0] | null>(null);
   const [coachFocusedTrade, setCoachFocusedTrade] = useState<ReturnType<typeof generateMockTrades>[number] | null>(null);
   const [importStatus, setImportStatus] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [importBroker, setImportBroker] = useState<"tradovate" | "robinhood" | "deepcharts">("tradovate");
   const [quote, setQuote] = useState(MARK_DOUGLAS_QUOTES[0]);
   useEffect(() => {
@@ -1039,10 +1040,20 @@ export default function ClientApp() {
         headers: { "Content-Type": "application/json" },
         body: payload,
       })
-        .then((res) => {
-          if (res.ok) lastSavedRef.current = payload;
+        .then(async (res) => {
+          if (res.ok) {
+            lastSavedRef.current = payload;
+            setSaveError("");
+          } else {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || `HTTP ${res.status}`);
+          }
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.error("Failed to save to database:", err);
+          setSaveError(`Failed to save to database: ${err.message}. Your changes are only saved locally.`);
+          setTimeout(() => setSaveError(""), 8000);
+        });
     }, 1500);
     return () => {
       if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
@@ -1768,6 +1779,11 @@ export default function ClientApp() {
         >
           {isDark ? <LucideSun size={22} strokeWidth={2} /> : <LucideMoon size={22} strokeWidth={2} />}
         </button>
+        {saveError && (
+          <div className="absolute bottom-full left-0 w-full mb-2 z-50 bg-red-500/90 text-white backdrop-blur-md shadow-lg border border-red-400 rounded-lg p-2 text-xs text-center">
+            {saveError}
+          </div>
+        )}
         {importStatus && activeTab !== "import" && (
           <div
             className={`absolute bottom-full left-0 w-full mb-2 z-50 bg-white/90 backdrop-blur-md shadow-lg border border-white/60 rounded-lg p-2 text-xs text-center dark:bg-[#27272a] dark:border-[#3f3f46]`}
