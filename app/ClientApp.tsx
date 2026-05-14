@@ -36,6 +36,22 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import { parseCsvText as libParseCsvText, detectDelimiter, headerFingerprint } from "./lib/import/csv";
+import { getParser, IMPORT_TAG_BY_ID } from "./lib/import/registry";
+import {
+  autoDetectMapping,
+  parseWithMapping,
+  universalParser,
+} from "./lib/import/parsers/universal";
+import type {
+  CsvData,
+  FieldConfidence,
+  ImportMapping,
+  ImportTemplate,
+  ParsedTrade,
+  TradeField,
+} from "./lib/import/types";
+import ImportMappingModal from "./components/ImportMappingModal";
 
 /** Model card icon options (id -> Lucide component). Used in Models tab and trade model tag. */
 const MODEL_ICONS: Record<string, LucideIcon> = {
@@ -857,7 +873,16 @@ export default function ClientApp() {
   const [coachFocusedTrade, setCoachFocusedTrade] = useState<ReturnType<typeof generateMockTrades>[number] | null>(null);
   const [importStatus, setImportStatus] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [importBroker, setImportBroker] = useState<"tradovate" | "robinhood" | "deepcharts">("tradovate");
+  // Selection can be a built-in parser id ("universal" | "tradovate" | ...) or a saved template id ("tpl_...").
+  const [importBroker, setImportBroker] = useState<string>("universal");
+  const [importTemplates, setImportTemplates] = useState<ImportTemplate[]>([]);
+  const [mappingModal, setMappingModal] = useState<{
+    csv: CsvData;
+    initialMapping: ImportMapping;
+    confidence?: FieldConfidence;
+    missing?: TradeField[];
+    brokerTag: string;
+  } | null>(null);
   const [quote, setQuote] = useState(MARK_DOUGLAS_QUOTES[0]);
   useEffect(() => {
     setQuote(MARK_DOUGLAS_QUOTES[Math.floor(Math.random() * MARK_DOUGLAS_QUOTES.length)]);
@@ -880,6 +905,7 @@ export default function ClientApp() {
           if (Array.isArray(data.trades)) setTrades(data.trades);
           if (data.discipline_notes && typeof data.discipline_notes === "object") setDisciplineNotes(data.discipline_notes);
           if (Array.isArray(data.models)) setModels(data.models);
+          if (Array.isArray(data.import_templates)) setImportTemplates(data.import_templates as ImportTemplate[]);
           if (data.theme === "dark" || data.theme === "light") {
             document.documentElement.classList.toggle("dark", data.theme === "dark");
             setIsDark(data.theme === "dark");
@@ -898,6 +924,15 @@ export default function ClientApp() {
           setTrades(stored && stored.length > 0 ? stored : generateMockTrades());
           if (typeof localStorage !== "undefined") {
             setHasImported(!!localStorage.getItem(USER_HAS_IMPORTED_KEY));
+            try {
+              const raw = localStorage.getItem("flowstate-import-templates");
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) setImportTemplates(parsed as ImportTemplate[]);
+              }
+            } catch {
+              // ignore
+            }
           }
         }
       })
@@ -1046,6 +1081,15 @@ export default function ClientApp() {
     saveModelsToStorage(models);
   }, [models]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("flowstate-import-templates", JSON.stringify(importTemplates));
+    } catch {
+      // ignore
+    }
+  }, [importTemplates]);
+
   // Debounced save to API when signed in (must be after disciplineNotes/models are declared).
   // Data (trades/notes/models/hasImported) and theme are saved separately so a dark-mode toggle
   // doesn't re-upload the full trades blob.
@@ -1058,6 +1102,7 @@ export default function ClientApp() {
       discipline_notes: disciplineNotes,
       models,
       user_has_imported: hasImported,
+      import_templates: importTemplates,
     });
     if (payload === lastSavedRef.current) return;
     if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
@@ -1087,7 +1132,7 @@ export default function ClientApp() {
     return () => {
       if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
     };
-  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported]);
+  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported, importTemplates]);
 
   // Theme-only save: tiny payload, fires only when isDark changes.
   const lastSavedThemeRef = useRef<string>("");
@@ -1195,461 +1240,128 @@ export default function ClientApp() {
     setEditingModelId((prev) => (prev === id ? null : prev));
   };
 
-  const parseCsvText = (text: string, delimiter: string = ","): { headers: string[]; rows: string[][] } => {
-    const rows: string[][] = [];
-    let current: string[] = [];
-    let field = "";
-    let inQuotes = false;
 
-    const pushField = () => {
-      current.push(field);
-      field = "";
-    };
-    const pushRow = () => {
-      if (current.length > 0) {
-        rows.push(current);
-      }
-      current = [];
-    };
-
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      if (ch === '"') {
-        if (inQuotes && text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (ch === delimiter && !inQuotes) {
-        pushField();
-      } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
-        if (field !== "" || current.length > 0) {
-          pushField();
-          pushRow();
-        }
-        while (text[i + 1] === "\n" || text[i + 1] === "\r") i++;
-      } else {
-        field += ch;
-      }
+  const commitParsedTrades = (parsedTrades: ParsedTrade[], brokerTag: string) => {
+    if (!parsedTrades.length) {
+      throw new Error("No valid trades found in this CSV.");
     }
-    if (field !== "" || current.length > 0) {
-      pushField();
-      pushRow();
-    }
+    parsedTrades.sort((a, b) => a.entryTime - b.entryTime);
+    const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 }));
+    const isFirstImport = !hasImported;
 
-    if (!rows.length) return { headers: [], rows: [] };
-    const headers = rows[0].map((h) => h.trim());
-    return { headers, rows: rows.slice(1) };
+    if (isFirstImport) {
+      let runningCapital = 50000;
+      const withCapital = parsedWithCapital.map((t) => {
+        runningCapital += t.pnl;
+        return { ...t, capitalAfter: runningCapital };
+      });
+      setTrades(withCapital.reverse() as ReturnType<typeof generateMockTrades>);
+      setHasImported(true);
+      try {
+        localStorage.setItem(USER_HAS_IMPORTED_KEY, "1");
+      } catch {
+        // ignore
+      }
+      setImportStatus(`Successfully imported ${parsedTrades.length} trade(s). Pre-populated data cleared.`);
+    } else {
+      setTrades((prevTrades) => {
+        const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
+          `${t.instrument}|${Math.round(t.entryTime / 1000)}|${Math.round(t.exitTime / 1000)}`;
+        const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
+        const kept = prevTrades.filter((t) => !t.tags?.includes(brokerTag) || isCombined(t));
+        const existingBrokerTrades = prevTrades.filter((t) => t.tags?.includes(brokerTag) && !isCombined(t));
+        const keysConsumedByCombined = new Set<string>(
+          kept.flatMap((t) => (isCombined(t) && t.combinedFromKeys ? t.combinedFromKeys : []))
+        );
+        // Keys belonging to OTHER brokers' trades — never overwrite or duplicate these.
+        const otherBrokerKeys = new Set<string>(
+          kept.filter((t) => !isCombined(t)).map((t) => tradeKeyForMerge(t))
+        );
+        const brokerMap = new Map<string, (typeof parsedWithCapital)[0]>();
+        for (const t of existingBrokerTrades) {
+          brokerMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
+        }
+        for (const t of parsedWithCapital) {
+          const key = tradeKeyForMerge(t);
+          if (keysConsumedByCombined.has(key)) continue;
+          if (otherBrokerKeys.has(key)) continue;
+          brokerMap.set(key, { ...t });
+        }
+        const mergedBroker = Array.from(brokerMap.values());
+        const combined = [...kept, ...mergedBroker].sort((a, b) => a.entryTime - b.entryTime);
+
+        let runningCapital = 50000;
+        const withCapital = combined.map((t) => {
+          runningCapital += t.pnl;
+          return { ...t, capitalAfter: runningCapital };
+        });
+
+        return withCapital.reverse() as ReturnType<typeof generateMockTrades>;
+      });
+      setImportStatus(`Successfully imported ${parsedTrades.length} trade(s). Previous data kept and merged.`);
+    }
+    setTimeout(() => setImportStatus(""), 4000);
+  };
+
+  /** Resolve the selected import option to a parser + tag + optional template. */
+  const resolveImportSelection = (selection: string) => {
+    const tpl = importTemplates.find((t) => t.id === selection);
+    if (tpl) return { kind: "template" as const, template: tpl, tag: tpl.name };
+    const parser = getParser(selection) ?? universalParser;
+    return { kind: "parser" as const, parser, tag: IMPORT_TAG_BY_ID[parser.id] ?? `${parser.label} Import` };
   };
 
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const brokerLabel = importBroker === "tradovate" ? "Tradovate" : importBroker === "robinhood" ? "Robinhood" : "DeepCharts";
-    setImportStatus(`Parsing ${brokerLabel} CSV...`);
+    const sel = resolveImportSelection(importBroker);
+    const label = sel.kind === "template" ? sel.template.name : sel.parser.label;
+    setImportStatus(`Parsing ${label} CSV...`);
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const text = (event.target?.result as string) ?? "";
-        const { headers, rows } = parseCsvText(text, importBroker === "deepcharts" ? ";" : ",");
-        if (!headers.length || !rows.length) throw new Error("File empty or missing data rows.");
+        // Pick delimiter: template/parser-defined first, then sniff.
+        const explicitDelimiter =
+          sel.kind === "template" ? sel.template.mapping.delimiter : sel.parser.delimiter;
+        const delimiter = explicitDelimiter ?? detectDelimiter(text);
+        const csv = libParseCsvText(text, delimiter);
+        if (!csv.headers.length || !csv.rows.length) throw new Error("File empty or missing data rows.");
 
-        type ParsedTrade = {
-          id: string;
-          instrument: string;
-          entryTime: number;
-          exitTime: number;
-          entryPrice?: number;
-          exitPrice?: number;
-          isLong?: boolean;
-          pnl: number;
-          capitalAfter?: number;
-          tags: string[];
-          modelTag?: string | null;
-          lotSize?: number;
-          notes: string;
-          strength: number;
-          modelAdherence: number;
-        };
-
-        const parsedTrades: ParsedTrade[] = [];
-        const lowerHeaders = headers.map((h) => h.toLowerCase());
-
-        if (importBroker === "tradovate") {
-          const pnlIdx = lowerHeaders.indexOf("pnl");
-          const instIdx = lowerHeaders.indexOf("symbol");
-          const boughtIdx = lowerHeaders.indexOf("boughttimestamp");
-          const soldIdx = lowerHeaders.indexOf("soldtimestamp");
-          const buyPriceIdx = lowerHeaders.indexOf("buyprice");
-          const sellPriceIdx = lowerHeaders.indexOf("sellprice");
-          // Prefer columns that mean "number of contracts"; exclude "contract size" (often 0.25 multiplier for MES).
-          const qtyIdx = lowerHeaders.findIndex((h) => {
-            const t = h.trim();
-            if (/contract\s*size|contractsize/.test(t)) return false;
-            return /quantity|^qty$|contracts|^size$|positionsize/.test(t);
-          });
-
-          if (
-            pnlIdx === -1 ||
-            instIdx === -1 ||
-            boughtIdx === -1 ||
-            soldIdx === -1 ||
-            buyPriceIdx === -1 ||
-            sellPriceIdx === -1
-          ) {
-            throw new Error("Missing required columns. Ensure it is a valid Tradovate export.");
+        // Template path: validate fingerprint matches; if not, fall through to auto-detect.
+        if (sel.kind === "template") {
+          if (headerFingerprint(csv.headers) === sel.template.fingerprint) {
+            const trades = parseWithMapping(csv, sel.template.mapping, { tag: sel.tag });
+            commitParsedTrades(trades, sel.tag);
+            return;
           }
-
-          rows.forEach((row, i) => {
-            if (row.length < headers.length) return;
-            const rawPnl = row[pnlIdx] ?? "";
-            const isNegative = rawPnl.includes("(") && rawPnl.includes(")");
-            const cleanPnl = parseFloat(String(rawPnl).replace(/[^0-9.]/g, ""));
-            if (Number.isNaN(cleanPnl)) return;
-            const pnl = isNegative ? -cleanPnl : cleanPnl;
-
-            const t1 = new Date(String(row[boughtIdx]).replace(/"/g, "")).getTime();
-            const t2 = new Date(String(row[soldIdx]).replace(/"/g, "")).getTime();
-            if (Number.isNaN(t1) || Number.isNaN(t2)) return;
-
-            const buyPrice = parseFloat(String(row[buyPriceIdx]));
-            const sellPrice = parseFloat(String(row[sellPriceIdx]));
-
-            const isLong = t1 < t2;
-            const entryTime = Math.min(t1, t2);
-            const exitTime = Math.max(t1, t2);
-            const entryPrice = isLong ? buyPrice : sellPrice;
-            const exitPrice = isLong ? sellPrice : buyPrice;
-
-            const rawQty = qtyIdx >= 0 ? parseFloat(String(row[qtyIdx]).replace(/"/g, "")) : NaN;
-            const lotSize = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : undefined;
-
-            parsedTrades.push({
-              id: `csv_${Date.now()}_${i}`,
-              instrument: String(row[instIdx]).replace(/"/g, "") || "UNKNOWN",
-              entryTime,
-              exitTime,
-              entryPrice,
-              exitPrice,
-              isLong,
-              pnl,
-              tags: ["Tradovate Import"],
-              modelTag: undefined,
-              lotSize,
-              notes: "",
-              strength: 0,
-              modelAdherence: 1,
-            });
-          });
-        } else if (importBroker === "robinhood") {
-          const activityIdx = lowerHeaders.indexOf("activity date");
-          const instrumentIdx = lowerHeaders.indexOf("instrument");
-          const descIdx = lowerHeaders.indexOf("description");
-          const transCodeIdx = lowerHeaders.indexOf("trans code");
-          const qtyIdx = lowerHeaders.indexOf("quantity");
-          const priceIdx = lowerHeaders.indexOf("price");
-          const amountIdx = lowerHeaders.indexOf("amount");
-
-          if (
-            activityIdx === -1 ||
-            instrumentIdx === -1 ||
-            transCodeIdx === -1 ||
-            qtyIdx === -1 ||
-            priceIdx === -1 ||
-            amountIdx === -1
-          ) {
-            throw new Error(
-              "Missing required columns. Ensure this is the Robinhood Activity CSV export (Activity Date, Instrument, Trans Code, Quantity, Price, Amount)."
-            );
-          }
-
-          const OPTIONS_TRANS_CODES = ["BTO", "STO", "STC", "BTC"];
-          const FUTURES_BUY_SELL = ["BUY", "SELL"];
-          const isFuturesSymbol = (sym: string) =>
-            /^\d*[A-Z]{1,5}\d*\/[A-Z0-9]+$/.test(sym) ||
-            /^(ES|NQ|MES|MNQ|CL|GC|ZB|ZN|RTY|YM|EMD|MCL|MGC|MESZ4|ESH5|NQZ4)$/i.test(sym.trim());
-
-          type RobinhoodEvent = {
-            dateMs: number;
-            instrument: string;
-            description: string;
-            transCode: string;
-            qty: number;
-            price: number;
-            amount: number;
-            rowIndex: number;
-            isFutures: boolean;
-          };
-
-          const events: RobinhoodEvent[] = [];
-          rows.forEach((row, i) => {
-            const instrumentRaw = (row[instrumentIdx] ?? "").toString().trim();
-            const transCode = (row[transCodeIdx] ?? "").toString().trim().toUpperCase();
-            const description = (descIdx >= 0 ? row[descIdx] ?? "" : "").toString().trim().replace(/\s+/g, " ");
-            if (!instrumentRaw || !transCode) return;
-
-            const isOption = OPTIONS_TRANS_CODES.includes(transCode);
-            const isFutures = isFuturesSymbol(instrumentRaw);
-            const isFuturesBuySell = isFutures && FUTURES_BUY_SELL.includes(transCode);
-            if (!isOption && !isFuturesBuySell) return;
-
-            const qty = parseFloat((row[qtyIdx] ?? "").toString().replace(/,/g, ""));
-            const price = parseFloat((row[priceIdx] ?? "").toString().replace(/[$,]/g, ""));
-            const amountStr = (row[amountIdx] ?? "").toString();
-            if (!amountStr || !Number.isFinite(qty) || qty <= 0) return;
-
-            const isNegative = amountStr.includes("(") && amountStr.includes(")");
-            const cleanAmount = parseFloat(amountStr.replace(/[^0-9.]/g, ""));
-            if (Number.isNaN(cleanAmount)) return;
-            const amount = isNegative ? -cleanAmount : cleanAmount;
-
-            const dateStr = (row[activityIdx] ?? "").toString().trim();
-            const dateMs = new Date(dateStr).getTime();
-            if (Number.isNaN(dateMs)) return;
-
-            events.push({
-              dateMs,
-              instrument: instrumentRaw,
-              description,
-              transCode,
-              qty,
-              price,
-              amount,
-              rowIndex: i,
-              isFutures,
-            });
-          });
-
-          events.sort((a, b) => a.dateMs - b.dateMs || a.rowIndex - b.rowIndex);
-
-          type Lot = { qty: number; price: number; amount: number; dateMs: number };
-          const longLotsByKey = new Map<string, Lot[]>();
-          const shortLotsByKey = new Map<string, Lot[]>();
-
-          const getPositionKey = (e: RobinhoodEvent) =>
-            !e.isFutures && e.description && /put|call|\d{1,2}\/\d{1,2}\/\d{2,4}|\$\d+/.test(e.description.toLowerCase())
-              ? `${e.instrument}|${e.description}`
-              : e.instrument;
-
-          const baseTime = Date.now();
-          events.forEach((e, idx) => {
-            const key = getPositionKey(e);
-            const openLong = e.transCode === "BTO" || (e.isFutures && e.transCode === "BUY");
-            const openShort = e.transCode === "STO";
-            const closeLong = e.transCode === "STC" || (e.isFutures && e.transCode === "SELL");
-            const closeShort = e.transCode === "BTC";
-            if (openLong) {
-              const lots = longLotsByKey.get(key) ?? [];
-              lots.push({ qty: e.qty, price: e.price, amount: e.amount, dateMs: e.dateMs });
-              longLotsByKey.set(key, lots);
-            } else if (openShort) {
-              const lots = shortLotsByKey.get(key) ?? [];
-              lots.push({ qty: e.qty, price: e.price, amount: e.amount, dateMs: e.dateMs });
-              shortLotsByKey.set(key, lots);
-            } else if (closeLong) {
-              let remaining = e.qty;
-              const lots = longLotsByKey.get(key) ?? [];
-              while (remaining > 1e-9 && lots.length > 0) {
-                const lot = lots[0];
-                const take = Math.min(lot.qty, remaining);
-                const entryAmount = (lot.amount / lot.qty) * take;
-                const exitAmount = (e.amount / e.qty) * take;
-                const realizedPnl = exitAmount - Math.abs(entryAmount);
-                parsedTrades.push({
-                  id: `csv_${baseTime}_${key.replace(/\|/g, "_")}_${idx}`,
-                  instrument: e.description || e.instrument,
-                  entryTime: lot.dateMs,
-                  exitTime: e.dateMs,
-                  entryPrice: lot.price,
-                  exitPrice: e.price,
-                  isLong: true,
-                  pnl: realizedPnl,
-                  tags: ["Robinhood Import"],
-                  modelTag: undefined,
-                  lotSize: take,
-                  notes: "",
-                  strength: 0,
-                  modelAdherence: 1,
-                });
-                remaining -= take;
-                lot.qty -= take;
-                if (lot.qty < 1e-9) lots.shift();
-              }
-              longLotsByKey.set(key, lots);
-            } else if (closeShort) {
-              let remaining = e.qty;
-              const lots = shortLotsByKey.get(key) ?? [];
-              while (remaining > 1e-9 && lots.length > 0) {
-                const lot = lots[0];
-                const take = Math.min(lot.qty, remaining);
-                const entryAmount = (lot.amount / lot.qty) * take;
-                const exitAmount = (e.amount / e.qty) * take;
-                const realizedPnl = Math.abs(entryAmount) - Math.abs(exitAmount);
-                parsedTrades.push({
-                  id: `csv_${baseTime}_${key.replace(/\|/g, "_")}_${idx}`,
-                  instrument: e.description || e.instrument,
-                  entryTime: lot.dateMs,
-                  exitTime: e.dateMs,
-                  entryPrice: lot.price,
-                  exitPrice: e.price,
-                  isLong: false,
-                  pnl: realizedPnl,
-                  tags: ["Robinhood Import"],
-                  modelTag: undefined,
-                  lotSize: take,
-                  notes: "",
-                  strength: 0,
-                  modelAdherence: 1,
-                });
-                remaining -= take;
-                lot.qty -= take;
-                if (lot.qty < 1e-9) lots.shift();
-              }
-              shortLotsByKey.set(key, lots);
-            }
-          });
-        } else if (importBroker === "deepcharts") {
-          const instIdx = lowerHeaders.findIndex((h) => h === "symbol");
-          const contractIdx = lowerHeaders.findIndex((h) => h === "contract");
-          const entryDateIdx = lowerHeaders.findIndex((h) => h === "entry date");
-          const exitDateIdx = lowerHeaders.findIndex((h) => h === "exit date");
-          const entryPriceIdx = lowerHeaders.findIndex((h) => h === "entry price");
-          const exitPriceIdx = lowerHeaders.findIndex((h) => h === "exit price");
-          const sideIdx = lowerHeaders.findIndex((h) => h === "side");
-          const qtyIdx = lowerHeaders.findIndex((h) => h === "quantity");
-          const pnlIdx = lowerHeaders.findIndex((h) => h === "net p/l");
-
-          if (
-            entryDateIdx === -1 ||
-            exitDateIdx === -1 ||
-            entryPriceIdx === -1 ||
-            exitPriceIdx === -1 ||
-            sideIdx === -1 ||
-            qtyIdx === -1 ||
-            pnlIdx === -1
-          ) {
-            throw new Error(
-              "Missing required columns. Ensure this is a DeepCharts export."
-            );
-          }
-
-          rows.forEach((row, i) => {
-            if (row.length < headers.length) return;
-            // The user requested to use the symbol column.
-            const instrumentRaw = String(row[instIdx] || row[contractIdx] || "UNKNOWN").replace(/"/g, "").trim();
-            const side = String(row[sideIdx]).toUpperCase().trim();
-            
-            const rawPnl = row[pnlIdx] ?? "";
-            const isNegative = rawPnl.includes("(") && rawPnl.includes(")");
-            const cleanPnl = parseFloat(String(rawPnl).replace(/[^0-9.-]/g, ""));
-            if (Number.isNaN(cleanPnl)) return;
-            const pnl = isNegative ? -Math.abs(cleanPnl) : cleanPnl;
-
-            const t1 = new Date(String(row[entryDateIdx]).replace(/"/g, "")).getTime();
-            const t2 = new Date(String(row[exitDateIdx]).replace(/"/g, "")).getTime();
-            if (Number.isNaN(t1) || Number.isNaN(t2)) return;
-
-            const entryPrice = parseFloat(String(row[entryPriceIdx]));
-            const exitPrice = parseFloat(String(row[exitPriceIdx]));
-
-            const rawQty = parseFloat(String(row[qtyIdx]).replace(/"/g, ""));
-            const lotSize = Number.isFinite(rawQty) ? Math.abs(rawQty) : undefined;
-            const isLong = side === "BUY";
-
-            parsedTrades.push({
-              id: `csv_${Date.now()}_deepcharts_${i}`,
-              instrument: instrumentRaw,
-              entryTime: Math.min(t1, t2),
-              exitTime: Math.max(t1, t2),
-              entryPrice,
-              exitPrice,
-              isLong,
-              pnl,
-              tags: ["DeepCharts Import"],
-              modelTag: undefined,
-              lotSize,
-              notes: "",
-              strength: 0,
-              modelAdherence: 1,
-            });
-          });
+          // fingerprint mismatch -> fall back to auto-detect with a notice
+          setImportStatus(`Template "${sel.template.name}" headers don't match this file — auto-detecting...`);
         }
 
-        if (!parsedTrades.length) {
-          throw new Error("No valid trades found in this CSV.");
-        }
-
-        parsedTrades.sort((a, b) => a.entryTime - b.entryTime);
-        const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 }));
-
-        // Use server-authoritative hasImported when signed in so re-imports on a new device
-        // (where localStorage is empty but Supabase has data) merge instead of replacing.
-        const isFirstImport = !hasImported;
-
-        if (isFirstImport) {
-          let runningCapital = 50000;
-          const withCapital = parsedWithCapital.map((t) => {
-            runningCapital += t.pnl;
-            return { ...t, capitalAfter: runningCapital };
-          });
-          setTrades(withCapital.reverse() as ReturnType<typeof generateMockTrades>);
-          setHasImported(true);
-          try {
-            localStorage.setItem(USER_HAS_IMPORTED_KEY, "1");
-          } catch {
-            // ignore
-          }
-          const addedCount = parsedTrades.length;
-          setImportStatus(`Successfully imported ${addedCount} trade(s). Pre-populated data cleared.`);
-        } else {
-          setTrades((prevTrades) => {
-            // Round to nearest second so re-imports with sub-ms timestamp drift still match.
-            const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
-              `${t.instrument}|${Math.round(t.entryTime / 1000)}|${Math.round(t.exitTime / 1000)}`;
-            const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
-            const brokerTag =
-              importBroker === "tradovate"
-                ? "Tradovate Import"
-                : importBroker === "robinhood"
-                ? "Robinhood Import"
-                : "DeepCharts Import";
-
-            const kept = prevTrades.filter(
-              (t) => !t.tags?.includes(brokerTag) || isCombined(t)
-            );
-            const existingBrokerTrades = prevTrades.filter(
-              (t) => t.tags?.includes(brokerTag) && !isCombined(t)
-            );
-            const keysConsumedByCombined = new Set<string>(
-              kept.flatMap((t) => (isCombined(t) && t.combinedFromKeys ? t.combinedFromKeys : []))
-            );
-            const brokerMap = new Map<string, (typeof parsedWithCapital)[0]>();
-            for (const t of existingBrokerTrades) {
-              brokerMap.set(tradeKeyForMerge(t), { ...t, capitalAfter: 0 } as (typeof parsedWithCapital)[0]);
-            }
-            for (const t of parsedWithCapital) {
-              const key = tradeKeyForMerge(t);
-              if (keysConsumedByCombined.has(key)) continue;
-              brokerMap.set(key, { ...t });
-            }
-            const mergedBroker = Array.from(brokerMap.values());
-            const combined = [...kept, ...mergedBroker].sort((a, b) => a.entryTime - b.entryTime);
-
-            let runningCapital = 50000;
-            const withCapital = combined.map((t) => {
-              runningCapital += t.pnl;
-              return { ...t, capitalAfter: runningCapital };
+        // Universal / auto-detect path: detect, then either parse or open the mapping modal.
+        if (sel.kind === "template" || sel.parser.id === "universal") {
+          const detected = autoDetectMapping(csv);
+          if (detected.ready) {
+            const trades = parseWithMapping(csv, detected.mapping, { tag: sel.tag });
+            commitParsedTrades(trades, sel.tag);
+          } else {
+            setImportStatus("");
+            setMappingModal({
+              csv,
+              initialMapping: { ...detected.mapping, delimiter },
+              confidence: detected.confidence,
+              missing: detected.missing,
+              brokerTag: sel.tag,
             });
-
-            return withCapital.reverse() as ReturnType<typeof generateMockTrades>;
-          });
-
-          const addedCount = parsedTrades.length;
-          setImportStatus(`Successfully imported ${addedCount} trade(s). Previous data kept and merged.`);
+          }
+          return;
         }
-        setTimeout(() => setImportStatus(""), 4000);
+
+        // Dedicated broker parser path.
+        const trades = sel.parser.parse(csv, { tag: sel.tag });
+        commitParsedTrades(trades, sel.tag);
       } catch (err) {
         setImportStatus(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
         setTimeout(() => setImportStatus(""), 4000);
@@ -1955,9 +1667,9 @@ export default function ClientApp() {
         <h3 className="text-lg font-semibold text-[#2e2e2e] dark:text-[#fafafa]">Instructions</h3>
         <ul className="list-disc list-inside space-y-2 text-sm text-gray-600 dark:text-[#a1a1aa]">
           <li>Export your account activity or trade history from your broker as a <strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">CSV file</strong>.</li>
-          <li>Choose the correct <strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Broker</strong> in the dropdown so we can parse the format correctly.</li>
-          <li><strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Tradovate:</strong> Use your platform&apos;s export (e.g. Account Performance) with columns such as Symbol, PnL, Bought/Sold Timestamp, Buy/Sell Price.</li>
-          <li><strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Robinhood:</strong> Use the Activity CSV export. Only options and futures trades (BTO, STO, STC, BTC) are imported; buys and sells are grouped into full round-trip trades (FIFO).</li>
+          <li>Leave the dropdown on <strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Auto-detect</strong> for most brokers — we&apos;ll match columns automatically. If detection is uncertain you&apos;ll get a quick column-mapping screen, and you can save the mapping as a template for next time.</li>
+          <li><strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Tradovate / DeepCharts:</strong> simple one-row-per-trade exports; the built-in parsers (or Auto-detect) work out of the box.</li>
+          <li><strong className="text-[#2e2e2e] dark:text-[#e5e7eb]">Robinhood:</strong> use the Activity CSV. Only options and futures trades (BTO, STO, STC, BTC) are imported and grouped into round-trip trades (FIFO) — select the Robinhood parser explicitly for this one.</li>
           <li>After importing, your first import replaces any demo data; later imports are merged with your existing trades.</li>
         </ul>
 
@@ -1969,14 +1681,38 @@ export default function ClientApp() {
             id="import-broker-select"
             value={importBroker}
             onChange={(ev) =>
-              setImportBroker(ev.target.value as any)
+              setImportBroker(ev.target.value)
             }
             className="w-full max-w-xs rounded-xl border border-white/60 dark:border-[#3f3f46] bg-white/50 dark:bg-[#3f3f46] px-4 py-3 text-[#111827] dark:text-[#e5e7eb] focus:outline-none focus:ring-2 focus:ring-[#98935c]"
           >
-            <option value="tradovate">Tradovate</option>
-            <option value="robinhood">Robinhood</option>
-            <option value="deepcharts">DeepCharts</option>
+            <optgroup label="Auto-detect">
+              <option value="universal">Auto-detect (any broker)</option>
+            </optgroup>
+            <optgroup label="Built-in parsers">
+              <option value="tradovate">Tradovate</option>
+              <option value="robinhood">Robinhood</option>
+              <option value="deepcharts">DeepCharts</option>
+            </optgroup>
+            {importTemplates.length > 0 && (
+              <optgroup label="Saved templates">
+                {importTemplates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
+          {importBroker.startsWith("tpl_") && (
+            <button
+              type="button"
+              onClick={() => {
+                setImportTemplates((prev) => prev.filter((t) => t.id !== importBroker));
+                setImportBroker("universal");
+              }}
+              className="self-start text-xs text-red-600 hover:underline"
+            >
+              Delete this template
+            </button>
+          )}
 
           <div>
             <label htmlFor="csv-upload-page" className="text-sm font-medium text-[#2e2e2e] dark:text-[#e5e7eb] block mb-2">
@@ -2944,6 +2680,40 @@ export default function ClientApp() {
           onSave={(updatedTrade) => {
             setTrades(trades.map((t) => (t.id === updatedTrade.id ? updatedTrade : t)));
             setSelectedTrade(null);
+          }}
+        />
+      )}
+      {mappingModal && (
+        <ImportMappingModal
+          csv={mappingModal.csv}
+          initialMapping={mappingModal.initialMapping}
+          confidence={mappingModal.confidence}
+          missing={mappingModal.missing}
+          onCancel={() => {
+            setMappingModal(null);
+            setImportStatus("");
+          }}
+          onConfirm={(mapping, saveAs) => {
+            try {
+              const trades = parseWithMapping(mappingModal.csv, mapping, { tag: mappingModal.brokerTag });
+              commitParsedTrades(trades, mappingModal.brokerTag);
+              if (saveAs) {
+                const tpl: ImportTemplate = {
+                  id: `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                  name: saveAs,
+                  fingerprint: headerFingerprint(mappingModal.csv.headers),
+                  mapping,
+                  createdAt: Date.now(),
+                };
+                setImportTemplates((prev) => [tpl, ...prev]);
+                setImportBroker(tpl.id);
+              }
+            } catch (err) {
+              setImportStatus(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+              setTimeout(() => setImportStatus(""), 4000);
+            } finally {
+              setMappingModal(null);
+            }
           }}
         />
       )}

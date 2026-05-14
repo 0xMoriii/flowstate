@@ -9,8 +9,13 @@ create table if not exists public.user_data (
   models jsonb default '[]'::jsonb,
   theme text,
   user_has_imported boolean default false,
+  import_templates jsonb default '[]'::jsonb,
   updated_at timestamptz default now()
 );
+
+-- Idempotent column add for existing installations.
+alter table public.user_data
+  add column if not exists import_templates jsonb default '[]'::jsonb;
 
 -- RLS: users can only read/write their own row.
 alter table public.user_data enable row level security;
