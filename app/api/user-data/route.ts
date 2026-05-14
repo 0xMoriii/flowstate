@@ -54,18 +54,36 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const row = {
-    user_id: user.id,
-    trades: body.trades ?? [],
-    discipline_notes: body.discipline_notes ?? {},
-    models: body.models ?? [],
-    theme: body.theme ?? null,
-    user_has_imported: body.user_has_imported ?? false,
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await supabase.from("user_data").upsert(row, {
-    onConflict: "user_id",
-  });
+  // Partial update: only write the columns the client actually sent. Lets the client save
+  // theme alone without re-uploading the full trades blob (which can include base64 images).
+  const updatedAt = new Date().toISOString();
+  const updates: Record<string, unknown> = { updated_at: updatedAt };
+  if (body.trades !== undefined) updates.trades = body.trades;
+  if (body.discipline_notes !== undefined) updates.discipline_notes = body.discipline_notes;
+  if (body.models !== undefined) updates.models = body.models;
+  if (body.theme !== undefined) updates.theme = body.theme;
+  if (body.user_has_imported !== undefined) updates.user_has_imported = body.user_has_imported;
+
+  const { data: existing, error: selectError } = await supabase
+    .from("user_data")
+    .select("user_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (selectError) {
+    return NextResponse.json({ error: selectError.message }, { status: 500 });
+  }
+
+  const error = existing
+    ? (await supabase.from("user_data").update(updates).eq("user_id", user.id)).error
+    : (await supabase.from("user_data").insert({
+        user_id: user.id,
+        trades: body.trades ?? [],
+        discipline_notes: body.discipline_notes ?? {},
+        models: body.models ?? [],
+        theme: body.theme ?? null,
+        user_has_imported: body.user_has_imported ?? false,
+        updated_at: updatedAt,
+      })).error;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

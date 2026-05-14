@@ -485,8 +485,9 @@ function CalendarView({
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
   const calendarContainerRef = useRef<HTMLDivElement>(null);
 
+  // Round to nearest second so re-imports with sub-ms timestamp drift still match.
   const tradeKey = (t: { instrument: string; entryTime: number; exitTime: number }) =>
-    `${t.instrument}|${t.entryTime}|${t.exitTime}`;
+    `${t.instrument}|${Math.round(t.entryTime / 1000)}|${Math.round(t.exitTime / 1000)}`;
 
   const handleCombineSelected = () => {
     if (selectedForCombine.size < 2) return;
@@ -872,6 +873,7 @@ export default function ClientApp() {
             document.documentElement.classList.toggle("dark", data.theme === "dark");
             setIsDark(data.theme === "dark");
           }
+          setHasImported(!!data.user_has_imported);
           if (data.user_has_imported && typeof localStorage !== "undefined") {
             try {
               localStorage.setItem(USER_HAS_IMPORTED_KEY, "1");
@@ -883,6 +885,9 @@ export default function ClientApp() {
           setUser(null);
           const stored = loadTradesFromStorage();
           setTrades(stored && stored.length > 0 ? stored : generateMockTrades());
+          if (typeof localStorage !== "undefined") {
+            setHasImported(!!localStorage.getItem(USER_HAS_IMPORTED_KEY));
+          }
         }
       })
       .catch(() => {
@@ -907,6 +912,12 @@ export default function ClientApp() {
   }, []);
 
   const [userDataFetched, setUserDataFetched] = useState(false);
+  // Server-authoritative flag for whether the user has ever imported a CSV.
+  // Falls back to localStorage when signed out. Drives the "first import replaces, later imports merge" decision.
+  const [hasImported, setHasImported] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return !!localStorage.getItem(USER_HAS_IMPORTED_KEY);
+  });
 
   const [chartTimeframe, setChartTimeframe] = useState("ALL");
 
@@ -1025,6 +1036,8 @@ export default function ClientApp() {
   }, [models]);
 
   // Debounced save to API when signed in (must be after disciplineNotes/models are declared).
+  // Data (trades/notes/models/hasImported) and theme are saved separately so a dark-mode toggle
+  // doesn't re-upload the full trades blob.
   const saveToApiRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>("");
   useEffect(() => {
@@ -1033,8 +1046,7 @@ export default function ClientApp() {
       trades,
       discipline_notes: disciplineNotes,
       models,
-      theme: isDark ? "dark" : "light",
-      user_has_imported: typeof window !== "undefined" && !!localStorage.getItem(USER_HAS_IMPORTED_KEY),
+      user_has_imported: hasImported,
     });
     if (payload === lastSavedRef.current) return;
     if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
@@ -1064,7 +1076,22 @@ export default function ClientApp() {
     return () => {
       if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
     };
-  }, [user?.id, userDataFetched, trades, disciplineNotes, models, isDark]);
+  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported]);
+
+  // Theme-only save: tiny payload, fires only when isDark changes.
+  const lastSavedThemeRef = useRef<string>("");
+  useEffect(() => {
+    if (!user || !userDataFetched) return;
+    const theme = isDark ? "dark" : "light";
+    if (theme === lastSavedThemeRef.current) return;
+    lastSavedThemeRef.current = theme;
+    fetch("/api/user-data", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ theme }),
+    }).catch((err) => console.error("Failed to save theme:", err));
+  }, [user?.id, userDataFetched, isDark]);
 
   const resetDraftModel = () => {
     setDraftModelName("");
@@ -1546,7 +1573,9 @@ export default function ClientApp() {
         parsedTrades.sort((a, b) => a.entryTime - b.entryTime);
         const parsedWithCapital = parsedTrades.map((t) => ({ ...t, capitalAfter: 0 }));
 
-        const isFirstImport = typeof window !== "undefined" && !localStorage.getItem(USER_HAS_IMPORTED_KEY);
+        // Use server-authoritative hasImported when signed in so re-imports on a new device
+        // (where localStorage is empty but Supabase has data) merge instead of replacing.
+        const isFirstImport = !hasImported;
 
         if (isFirstImport) {
           let runningCapital = 50000;
@@ -1555,6 +1584,7 @@ export default function ClientApp() {
             return { ...t, capitalAfter: runningCapital };
           });
           setTrades(withCapital.reverse() as ReturnType<typeof generateMockTrades>);
+          setHasImported(true);
           try {
             localStorage.setItem(USER_HAS_IMPORTED_KEY, "1");
           } catch {
@@ -1564,8 +1594,9 @@ export default function ClientApp() {
           setImportStatus(`Successfully imported ${addedCount} trade(s). Pre-populated data cleared.`);
         } else {
           setTrades((prevTrades) => {
+            // Round to nearest second so re-imports with sub-ms timestamp drift still match.
             const tradeKeyForMerge = (t: { instrument: string; entryTime: number; exitTime: number }) =>
-              `${t.instrument}|${t.entryTime}|${t.exitTime}`;
+              `${t.instrument}|${Math.round(t.entryTime / 1000)}|${Math.round(t.exitTime / 1000)}`;
             const isCombined = (t: { id?: string }) => t.id?.startsWith("combined_");
             const brokerTag =
               importBroker === "tradovate"
