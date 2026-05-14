@@ -561,6 +561,19 @@ function CalendarView({
   const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = getDaysInMonth(viewMonth, viewYear);
 
+  // Pre-group trades by date string in a single pass so per-day lookup is O(1).
+  // Replaces an O(trades × days) nested filter that allocated a Date per comparison.
+  const tradesByDate = useMemo(() => {
+    const map = new Map<string, CalendarTrade[]>();
+    for (const t of trades) {
+      const key = new Date(t.entryTime).toDateString();
+      const arr = map.get(key);
+      if (arr) arr.push(t);
+      else map.set(key, [t]);
+    }
+    return map;
+  }, [trades]);
+
   let totalMonthlyPnL = 0;
   const weeks: { days: (null | { date: number; fullDate: string; trades: CalendarTrade[]; pnl: number })[]; weeklyPnL: number }[] = [];
   let currentWeek: { days: (null | { date: number; fullDate: string; trades: CalendarTrade[]; pnl: number })[]; weeklyPnL: number } = {
@@ -570,7 +583,7 @@ function CalendarView({
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = new Date(viewYear, viewMonth, d).toDateString();
-    const dayTrades = trades.filter((t) => new Date(t.entryTime).toDateString() === dateStr);
+    const dayTrades = tradesByDate.get(dateStr) ?? [];
     const dayPnL = dayTrades.reduce((sum, t) => sum + t.pnl, 0);
 
     totalMonthlyPnL += dayPnL;
@@ -587,9 +600,7 @@ function CalendarView({
     weeks.push(currentWeek);
   }
 
-  const tradesForSelectedDate = selectedDate
-    ? trades.filter((t) => new Date(t.entryTime).toDateString() === selectedDate)
-    : [];
+  const tradesForSelectedDate = selectedDate ? tradesByDate.get(selectedDate) ?? [] : [];
 
   return (
     <div className="fade-in space-y-6">
@@ -1648,19 +1659,30 @@ export default function ClientApp() {
     e.target.value = "";
   };
 
+  // Split into separate memos: best/worst is one O(n) pass per trade change; the 30-day
+  // window subsets are stable across most trade edits and can be cached independently.
+  const tradeWindows = useMemo(() => {
+    const now = Date.now();
+    const ms30 = 30 * 86400000;
+    const current30: typeof trades = [];
+    const prior30: typeof trades = [];
+    let bestTrade: (typeof trades)[number] | null = null;
+    let worstTrade: (typeof trades)[number] | null = null;
+    for (const t of trades) {
+      if (t.entryTime >= now - ms30) current30.push(t);
+      else if (t.entryTime >= now - ms30 * 2) prior30.push(t);
+      if (!bestTrade || t.pnl > bestTrade.pnl) bestTrade = t;
+      if (!worstTrade || t.pnl < worstTrade.pnl) worstTrade = t;
+    }
+    return { current30, prior30, bestTrade, worstTrade };
+  }, [trades]);
+
   const metrics = useMemo(() => {
     const result = computeMetricsFromTrades(trades);
     if (!result) return null;
 
-    const bestTrade = trades.reduce((prev, current) => (prev.pnl > current.pnl ? prev : current));
-    const worstTrade = trades.reduce((prev, current) => (prev.pnl < current.pnl ? prev : current));
-
-    const now = Date.now();
-    const ms30 = 30 * 86400000;
-    const current30 = trades.filter((t) => t.entryTime >= now - ms30);
-    const prior30 = trades.filter((t) => t.entryTime >= now - ms30 * 2 && t.entryTime < now - ms30);
-    const currentM = computeMetricsFromTrades(current30);
-    const priorM = computeMetricsFromTrades(prior30);
+    const currentM = computeMetricsFromTrades(tradeWindows.current30);
+    const priorM = computeMetricsFromTrades(tradeWindows.prior30);
     const hasPriorData = !!(priorM && priorM.totalTrades > 0 && currentM && currentM.totalTrades > 0);
     const trends = {
       hasPrevData: hasPriorData,
@@ -1671,11 +1693,11 @@ export default function ClientApp() {
 
     return {
       ...result,
-      bestTrade,
-      worstTrade,
+      bestTrade: tradeWindows.bestTrade!,
+      worstTrade: tradeWindows.worstTrade!,
       trends,
     };
-  }, [trades]);
+  }, [trades, tradeWindows]);
 
   const filteredChartData = useMemo(() => {
     if (!trades.length) return { data: [] as { time: number; value: number }[], isPositive: true, currentNet: 0 };
@@ -2364,15 +2386,25 @@ export default function ClientApp() {
     </div>
   );
 
+  // Most recent day that has at least one trade (so weekends / no-trade days still show last recap).
+  // Memoized so reopening the tab or unrelated state changes don't re-sort all trades.
+  const recap = useMemo(() => {
+    if (trades.length === 0) return { recapDate: null as string | null, recapTrades: [] as typeof trades };
+    const byDate = new Map<string, typeof trades>();
+    let mostRecent: { date: string; ts: number } | null = null;
+    for (const t of trades) {
+      const key = new Date(t.entryTime).toDateString();
+      const arr = byDate.get(key);
+      if (arr) arr.push(t);
+      else byDate.set(key, [t]);
+      if (!mostRecent || t.entryTime > mostRecent.ts) mostRecent = { date: key, ts: t.entryTime };
+    }
+    const recapDate = mostRecent?.date ?? null;
+    return { recapDate, recapTrades: recapDate ? byDate.get(recapDate) ?? [] : [] };
+  }, [trades]);
+
   const renderDailyRecap = () => {
-    // Use the most recent day that has at least one trade (so weekends / no-trade days still show last recap)
-    const datesWithTrades = [...new Set(trades.map((t) => new Date(t.entryTime).toDateString()))].sort(
-      (a, b) => new Date(b).getTime() - new Date(a).getTime()
-    );
-    const recapDate = datesWithTrades[0] ?? null;
-    const recapTrades = recapDate
-      ? trades.filter((t) => new Date(t.entryTime).toDateString() === recapDate)
-      : [];
+    const { recapDate, recapTrades } = recap;
 
     return (
       <div className="flex flex-col gap-8 fade-in">
