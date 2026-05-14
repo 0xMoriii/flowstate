@@ -496,10 +496,16 @@ function CalendarView({
     const exitTime = Math.max(...toCombine.map((t) => t.exitTime));
     const combinedPnL = toCombine.reduce((sum, t) => sum + t.pnl, 0);
     const lastTrade = toCombine.reduce((a, b) => (a.exitTime > b.exitTime ? a : b));
-    const allTags = [...new Set(toCombine.flatMap((t) => t.tags))];
+    const allTags = [...new Set(toCombine.flatMap((t) => t.tags || []).filter(Boolean))];
     const allNotes = toCombine.map((t) => t.notes).filter(Boolean).join("\n\n");
     const allChartImages = toCombine.flatMap((t) => t.chartImages ?? (t.chartImage ? [t.chartImage] : []));
     const firstTrade = toCombine.reduce((a, b) => (a.entryTime < b.entryTime ? a : b));
+    
+    // Accumulate all constituent keys so re-importing CSV doesn't duplicate them
+    const allCombinedKeys = [...new Set(toCombine.flatMap((t) => 
+      (t.combinedFromKeys && t.combinedFromKeys.length > 0) ? t.combinedFromKeys : [tradeKey(t)]
+    ))];
+
     const combined: CalendarTrade = {
       ...firstTrade,
       id: `combined_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -511,7 +517,7 @@ function CalendarView({
       notes: allNotes || firstTrade.notes,
       chartImages: allChartImages.length > 0 ? allChartImages : undefined,
       chartImage: undefined,
-      combinedFromKeys: toCombine.map((t) => tradeKey(t)),
+      combinedFromKeys: allCombinedKeys,
     };
     setTrades((prev) => {
       const idsToRemove = new Set(toCombine.map((t) => t.id));
