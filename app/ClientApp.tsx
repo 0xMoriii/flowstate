@@ -52,6 +52,7 @@ import type {
   TradeField,
 } from "./lib/import/types";
 import ImportMappingModal from "./components/ImportMappingModal";
+import { formatEtDayKey, formatEtTime, formatEtDateTime, formatEtShortDate, formatEtWeekdayDate, formatDurationHMS } from "./lib/time/et";
 
 /** Model card icon options (id -> Lucide component). Used in Models tab and trade model tag. */
 const MODEL_ICONS: Record<string, LucideIcon> = {
@@ -207,6 +208,8 @@ const generateMockTrades = () => {
     chartImage?: string; // legacy single image (migrated to chartImages)
     chartImages?: string[]; // base64 data URLs for attached chart/screenshots
     combinedFromKeys?: string[]; // when this trade is a combined trade, keys (instrument|entryTime|exitTime) of constituent trades so CSV import doesn't re-add them
+    timeInTradeMs?: number; // sum of leg durations for combined trades
+    mergedSources?: Array<Record<string, unknown>>; // snapshot of original trade objects for uncombine
   }> = [];
   let currentCapital = 50000;
   const now = new Date();
@@ -499,31 +502,41 @@ function CalendarView({
   const hideWeeklyColumn = isMobile;
   const [compactCalendar, setCompactCalendar] = useState(false);
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
+  const [confirmClearDay, setConfirmClearDay] = useState(false);
   const calendarContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setConfirmClearDay(false);
+  }, [selectedDate]);
+
+  const handleClearDay = () => {
+    if (!selectedDate) return;
+    setTrades((prev) => prev.filter((t) => formatEtDayKey(t.entryTime) !== selectedDate));
+    setConfirmClearDay(false);
+    setSelectedForCombine(new Set());
+  };
 
   // Round to nearest second so re-imports with sub-ms timestamp drift still match.
   const tradeKey = (t: { instrument: string; entryTime: number; exitTime: number }) =>
     `${t.instrument}|${Math.round(t.entryTime / 1000)}|${Math.round(t.exitTime / 1000)}`;
 
-  const handleCombineSelected = () => {
-    if (selectedForCombine.size < 2) return;
-    const toCombine = trades.filter((t) => selectedForCombine.has(t.id));
-    if (toCombine.length < 2) return;
-    const entryTime = Math.min(...toCombine.map((t) => t.entryTime));
-    const exitTime = Math.max(...toCombine.map((t) => t.exitTime));
-    const combinedPnL = toCombine.reduce((sum, t) => sum + t.pnl, 0);
-    const lastTrade = toCombine.reduce((a, b) => (a.exitTime > b.exitTime ? a : b));
-    const allTags = [...new Set(toCombine.flatMap((t) => t.tags || []).filter(Boolean))];
-    const allNotes = toCombine.map((t) => t.notes).filter(Boolean).join("\n\n");
-    const allChartImages = toCombine.flatMap((t) => t.chartImages ?? (t.chartImage ? [t.chartImage] : []));
-    const firstTrade = toCombine.reduce((a, b) => (a.entryTime < b.entryTime ? a : b));
-    
-    // Accumulate all constituent keys so re-importing CSV doesn't duplicate them
-    const allCombinedKeys = [...new Set(toCombine.flatMap((t) => 
+  const mergeTradeGroup = (group: CalendarTrade[]): CalendarTrade => {
+    const entryTime = Math.min(...group.map((t) => t.entryTime));
+    const exitTime = Math.max(...group.map((t) => t.exitTime));
+    const combinedPnL = group.reduce((sum, t) => sum + t.pnl, 0);
+    const lastTrade = group.reduce((a, b) => (a.exitTime > b.exitTime ? a : b));
+    const firstTrade = group.reduce((a, b) => (a.entryTime < b.entryTime ? a : b));
+    const allTags = [...new Set(group.flatMap((t) => t.tags || []).filter(Boolean))];
+    const allNotes = group.map((t) => t.notes).filter(Boolean).join("\n\n");
+    const allChartImages = group.flatMap((t) => t.chartImages ?? (t.chartImage ? [t.chartImage] : []));
+    const allCombinedKeys = [...new Set(group.flatMap((t) =>
       (t.combinedFromKeys && t.combinedFromKeys.length > 0) ? t.combinedFromKeys : [tradeKey(t)]
     ))];
+    const summedLotSize = group.reduce((s, t) => s + (Number.isFinite(t.lotSize) ? (t.lotSize as number) : 0), 0);
+    const timeInTradeMs = group.reduce((s, t) => s + Math.max(0, t.exitTime - t.entryTime), 0);
+    const mergedSources = group.map((t) => JSON.parse(JSON.stringify(t)) as Record<string, unknown>);
 
-    const combined: CalendarTrade = {
+    return {
       ...firstTrade,
       id: `combined_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       entryTime,
@@ -535,16 +548,88 @@ function CalendarView({
       chartImages: allChartImages.length > 0 ? allChartImages : undefined,
       chartImage: undefined,
       combinedFromKeys: allCombinedKeys,
+      lotSize: summedLotSize > 0 ? summedLotSize : firstTrade.lotSize,
+      timeInTradeMs,
+      mergedSources,
     };
+  };
+
+  const handleCombineSelected = () => {
+    if (selectedForCombine.size < 2) return;
+    const toCombine = trades.filter((t) => selectedForCombine.has(t.id));
+    if (toCombine.length < 2) return;
+    const combined = mergeTradeGroup(toCombine);
     setTrades((prev) => {
       const idsToRemove = new Set(toCombine.map((t) => t.id));
       const kept = prev.filter((t) => !idsToRemove.has(t.id));
-      const inserted = [...kept, combined].sort((a, b) => a.entryTime - b.entryTime);
-      return inserted;
+      return [...kept, combined].sort((a, b) => a.entryTime - b.entryTime);
     });
     setSelectedForCombine(new Set());
     setSelectedTrade(combined);
   };
+
+  const [autoCombinePreview, setAutoCombinePreview] = useState<CalendarTrade[][] | null>(null);
+
+  const computeAutoCombineClusters = (dayTrades: CalendarTrade[]): CalendarTrade[][] => {
+    const buckets = new Map<string, CalendarTrade[]>();
+    for (const t of dayTrades) {
+      const k = `${t.instrument}|${t.isLong === undefined ? "unk" : t.isLong ? "L" : "S"}`;
+      const arr = buckets.get(k);
+      if (arr) arr.push(t);
+      else buckets.set(k, [t]);
+    }
+    const clusters: CalendarTrade[][] = [];
+    for (const list of buckets.values()) {
+      list.sort((a, b) => a.entryTime - b.entryTime);
+      let current: CalendarTrade[] = [];
+      let maxExit = -Infinity;
+      for (const t of list) {
+        if (current.length === 0 || t.entryTime <= maxExit) {
+          current.push(t);
+          maxExit = Math.max(maxExit, t.exitTime);
+        } else {
+          if (current.length >= 2) clusters.push(current);
+          current = [t];
+          maxExit = t.exitTime;
+        }
+      }
+      if (current.length >= 2) clusters.push(current);
+    }
+    return clusters;
+  };
+
+  const handleAutoCombinePreview = () => {
+    setAutoCombinePreview(computeAutoCombineClusters(tradesForSelectedDate));
+  };
+
+  const handleAutoCombineConfirm = () => {
+    if (!autoCombinePreview || autoCombinePreview.length === 0) {
+      setAutoCombinePreview(null);
+      return;
+    }
+    const merged = autoCombinePreview.map(mergeTradeGroup);
+    setTrades((prev) => {
+      const idsToRemove = new Set(autoCombinePreview.flat().map((t) => t.id));
+      const kept = prev.filter((t) => !idsToRemove.has(t.id));
+      return [...kept, ...merged].sort((a, b) => a.entryTime - b.entryTime);
+    });
+    setAutoCombinePreview(null);
+    setSelectedForCombine(new Set());
+  };
+
+  const autoCombineSummary = useMemo(() => {
+    if (!autoCombinePreview) return "";
+    if (autoCombinePreview.length === 0) return "No overlapping trades found";
+    const counts = new Map<string, number>();
+    for (const group of autoCombinePreview) {
+      const first = group[0];
+      const side = first.isLong === undefined ? "" : first.isLong ? " long" : " short";
+      const k = `${first.instrument}${side}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const parts = [...counts.entries()].map(([k, n]) => `${n}× ${k}`).join(", ");
+    return `Found ${autoCombinePreview.length} group${autoCombinePreview.length === 1 ? "" : "s"}: ${parts}`;
+  }, [autoCombinePreview]);
 
   const toggleSelectForCombine = (e: React.MouseEvent, tradeId: string) => {
     e.stopPropagation();
@@ -558,6 +643,7 @@ function CalendarView({
 
   useEffect(() => {
     setSelectedForCombine(new Set());
+    setAutoCombinePreview(null);
   }, [selectedDate]);
 
   useEffect(() => {
@@ -582,7 +668,7 @@ function CalendarView({
   const tradesByDate = useMemo(() => {
     const map = new Map<string, CalendarTrade[]>();
     for (const t of trades) {
-      const key = new Date(t.entryTime).toDateString();
+      const key = formatEtDayKey(t.entryTime);
       const arr = map.get(key);
       if (arr) arr.push(t);
       else map.set(key, [t]);
@@ -598,7 +684,7 @@ function CalendarView({
   };
 
   for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = new Date(viewYear, viewMonth, d).toDateString();
+    const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     const dayTrades = tradesByDate.get(dateStr) ?? [];
     const dayPnL = dayTrades.reduce((sum, t) => sum + t.pnl, 0);
 
@@ -756,14 +842,51 @@ function CalendarView({
             <GlassCard>
               <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-white/50 dark:border-[#3f3f46] pb-4">
                 <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">
-                  {new Date(selectedDate).toLocaleDateString(undefined, {
-                    weekday: "long",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                  {(() => {
+                    const [yy, mm, dd] = selectedDate.split("-").map(Number);
+                    return new Date(yy, (mm ?? 1) - 1, dd ?? 1).toLocaleDateString(undefined, {
+                      weekday: "long",
+                      month: "long",
+                      day: "numeric",
+                    });
+                  })()}
                 </h3>
-                <div className="flex items-center gap-3">
-                  {selectedForCombine.size >= 2 && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  {autoCombinePreview !== null && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700 dark:text-[#fafafa]">
+                        {autoCombineSummary}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setAutoCombinePreview(null)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 hover:bg-white/40"
+                      >
+                        Cancel
+                      </button>
+                      {autoCombinePreview.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAutoCombineConfirm}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#98935c] text-white hover:bg-[#7d7848]"
+                        >
+                          Confirm
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {autoCombinePreview === null && tradesForSelectedDate.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={handleAutoCombinePreview}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#98935c]/10 text-[#2e2e2e] dark:text-[#fafafa] hover:bg-[#98935c]/20 border border-[#98935c]/30 transition-colors"
+                      aria-label="Auto-combine overlapping trades"
+                    >
+                      <LucideMerge className="w-4 h-4" />
+                      Auto-combine
+                    </button>
+                  )}
+                  {autoCombinePreview === null && selectedForCombine.size >= 2 && (
                     <button
                       type="button"
                       onClick={handleCombineSelected}
@@ -772,6 +895,38 @@ function CalendarView({
                       <LucideMerge className="w-4 h-4" />
                       Combine {selectedForCombine.size} trades
                     </button>
+                  )}
+                  {autoCombinePreview === null && tradesForSelectedDate.length > 0 && !confirmClearDay && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClearDay(true)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-[#f43636] hover:bg-[#f43636]/10 border border-transparent hover:border-[#f43636]/30 transition-colors"
+                      aria-label="Clear all trades on this day"
+                    >
+                      <LucideTrash2 className="w-4 h-4" />
+                      Clear day
+                    </button>
+                  )}
+                  {confirmClearDay && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-600 dark:text-[#a1a1aa]">
+                        Delete all {tradesForSelectedDate.length} trades on this day?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmClearDay(false)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 hover:bg-white/40"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearDay}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#f43636] text-white hover:bg-[#d62929]"
+                      >
+                        Delete all
+                      </button>
+                    </div>
                   )}
                   <span className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa]">
                     {tradesForSelectedDate.length} Trades
@@ -783,10 +938,12 @@ function CalendarView({
               ) : (
                 <>
                   <p className="text-xs text-gray-500 dark:text-[#a1a1aa] mb-3">
-                    Select two or more trades (e.g. same position with multiple take-profits) to combine P&amp;L into one.
+                    {autoCombinePreview !== null
+                      ? "Review the groups below. Each box will become a single combined trade when you click Confirm."
+                      : "Select two or more trades (e.g. same position with multiple take-profits) to combine P&L into one."}
                   </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {tradesForSelectedDate.map((t) => (
+                  {(() => {
+                    const renderTradeCard = (t: CalendarTrade) => (
                       <div
                         key={t.id}
                         onClick={() => setSelectedTrade(t)}
@@ -818,12 +975,71 @@ function CalendarView({
                           </span>
                         </div>
                         <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">
-                          {new Date(t.entryTime).toLocaleTimeString()} -{" "}
-                          {new Date(t.exitTime).toLocaleTimeString()}
+                          {formatEtTime(t.entryTime)} - {formatEtTime(t.exitTime)}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+
+                    if (autoCombinePreview !== null) {
+                      const groupedIds = new Set(autoCombinePreview.flat().map((t) => t.id));
+                      const ungrouped = tradesForSelectedDate.filter((t) => !groupedIds.has(t.id));
+                      return (
+                        <div className="flex flex-col gap-5">
+                          {autoCombinePreview.map((group, idx) => {
+                            const first = group[0];
+                            const sideLabel = first.isLong === undefined ? "" : first.isLong ? " long" : " short";
+                            const groupPnL = group.reduce((s, t) => s + t.pnl, 0);
+                            const groupLots = group.reduce((s, t) => s + (Number.isFinite(t.lotSize) ? (t.lotSize as number) : 0), 0);
+                            return (
+                              <div
+                                key={`grp-${idx}`}
+                                className="rounded-2xl border-2 border-[#98935c] bg-[#98935c]/10 p-4"
+                              >
+                                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3 px-1">
+                                  <div className="flex items-baseline gap-3">
+                                    <span className="text-xs font-bold uppercase tracking-widest text-[#98935c]">
+                                      Group {idx + 1}
+                                    </span>
+                                    <span className="font-semibold text-[#2e2e2e] dark:text-[#fafafa]">
+                                      {formatSymbolDisplay(first.instrument)}{sideLabel}
+                                    </span>
+                                    <span className="text-xs text-gray-600 dark:text-[#a1a1aa]">
+                                      {group.length} trades{groupLots > 0 ? ` · ${groupLots} contracts` : ""}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className="text-sm font-semibold"
+                                    style={{ color: groupPnL >= 0 ? COLORS.profit : COLORS.loss }}
+                                  >
+                                    {formatPnl(groupPnL, 2)}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                  {group.map(renderTradeCard)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {ungrouped.length > 0 && (
+                            <div className="rounded-2xl border border-dashed border-gray-300 dark:border-[#3f3f46] p-4 opacity-70">
+                              <div className="text-xs font-bold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-3 px-1">
+                                Not in any group ({ungrouped.length})
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                {ungrouped.map(renderTradeCard)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {tradesForSelectedDate.map(renderTradeCard)}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </GlassCard>
@@ -1965,7 +2181,7 @@ export default function ClientApp() {
               <div>
                 <div className="text-lg font-semibold text-[#2e2e2e] dark:text-[#fafafa]">{formatSymbolDisplay(metrics.bestTrade.instrument)}</div>
                 <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa] mt-1">
-                  {new Date(metrics.bestTrade.entryTime).toLocaleDateString()}
+                  {formatEtShortDate(metrics.bestTrade.entryTime)}
                 </div>
               </div>
               <div className="display-font text-5xl tracking-tight" style={{ color: COLORS.profit }}>
@@ -1991,7 +2207,7 @@ export default function ClientApp() {
                   {formatSymbolDisplay(metrics.worstTrade.instrument)}
                 </div>
                 <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa] mt-1">
-                  {new Date(metrics.worstTrade.entryTime).toLocaleDateString()}
+                  {formatEtShortDate(metrics.worstTrade.entryTime)}
                 </div>
               </div>
               <div className="display-font text-5xl tracking-tight" style={{ color: COLORS.loss }}>
@@ -2038,8 +2254,8 @@ export default function ClientApp() {
                 tick={{ fontSize: 10, fill: "#888", fontFamily: "Inter" }}
                 tickFormatter={(t) =>
                   chartTimeframe === "1W"
-                    ? new Date(t).toLocaleDateString(undefined, { weekday: "short" })
-                    : new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                    ? new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(new Date(t))
+                    : new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }).format(new Date(t))
                 }
                 minTickGap={30}
               />
@@ -2061,7 +2277,7 @@ export default function ClientApp() {
                   boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
                 }}
                 labelStyle={{ color: "#2e2e2e", fontFamily: "Inter" }}
-                labelFormatter={(l) => new Date(l).toLocaleString()}
+                labelFormatter={(l) => formatEtDateTime(typeof l === "number" ? l : new Date(l).getTime())}
                 formatter={(value: number) => [`$${value.toFixed(2)}`, "Net Profit"]}
                 itemStyle={{ color: COLORS.text, fontWeight: 600, fontFamily: "Inter" }}
               />
@@ -2129,7 +2345,7 @@ export default function ClientApp() {
     const byDate = new Map<string, typeof trades>();
     let mostRecent: { date: string; ts: number } | null = null;
     for (const t of trades) {
-      const key = new Date(t.entryTime).toDateString();
+      const key = formatEtDayKey(t.entryTime);
       const arr = byDate.get(key);
       if (arr) arr.push(t);
       else byDate.set(key, [t]);
@@ -2147,7 +2363,10 @@ export default function ClientApp() {
         <h2 className="display-font text-5xl mb-6 text-[#2e2e2e] dark:text-[#fafafa]">Daily Recap</h2>
         {recapDate && (
           <p className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] -mt-2 mb-2">
-            Showing recap for {new Date(recapDate).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
+            Showing recap for {(() => {
+              const [yy, mm, dd] = recapDate.split("-").map(Number);
+              return new Date(yy, (mm ?? 1) - 1, dd ?? 1).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+            })()}
           </p>
         )}
         {/* Desktop: 40% Flow Lab left, 60% Trades right. Mobile: stacked (trades then Flow Lab). */}
@@ -2189,8 +2408,7 @@ export default function ClientApp() {
                     </span>
                   </div>
                   <div className="text-sm font-medium text-gray-500 dark:text-[#a1a1aa] mb-4">
-                    {new Date(trade.entryTime).toLocaleTimeString()} -{" "}
-                    {new Date(trade.exitTime).toLocaleTimeString()}
+                    {formatEtTime(trade.entryTime)} - {formatEtTime(trade.exitTime)}
                   </div>
                   <div className="flex flex-wrap gap-2 mb-4 min-w-0">
                     {trade.tags.map((tag) => (
@@ -2541,7 +2759,7 @@ export default function ClientApp() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-gray-400 mr-2">
-                      Created {new Date(model.createdAt).toLocaleDateString()}
+                      Created {formatEtShortDate(new Date(model.createdAt).getTime())}
                     </span>
                     <button
                       type="button"
@@ -2681,6 +2899,20 @@ export default function ClientApp() {
             setTrades(trades.map((t) => (t.id === updatedTrade.id ? updatedTrade : t)));
             setSelectedTrade(null);
           }}
+          onDelete={(tradeId) => {
+            setTrades((prev) => prev.filter((t) => t.id !== tradeId));
+            setSelectedTrade(null);
+          }}
+          onUncombine={(tradeId) => {
+            setTrades((prev) => {
+              const target = prev.find((t) => t.id === tradeId);
+              if (!target || !target.mergedSources || target.mergedSources.length === 0) return prev;
+              const restored = target.mergedSources.map((src) => src as unknown as CalendarTrade);
+              const without = prev.filter((t) => t.id !== tradeId);
+              return [...without, ...restored].sort((a, b) => a.entryTime - b.entryTime);
+            });
+            setSelectedTrade(null);
+          }}
         />
       )}
       {mappingModal && (
@@ -2741,7 +2973,7 @@ function buildTradesContext(
   const sorted = [...trades].sort((a, b) => b.entryTime - a.entryTime).slice(0, max);
   return sorted
     .map((t, i) => {
-      const date = new Date(t.entryTime).toLocaleDateString();
+      const date = formatEtShortDate(t.entryTime);
       const notesSnippet = (t.notes?.trim() ?? "").slice(0, 80);
       return `${i + 1}. ${t.instrument} | ${date} | PnL ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)} | tags: ${(t.tags ?? []).join(", ") || "—"}${notesSnippet ? ` | notes: ${notesSnippet}${notesSnippet.length >= 80 ? "…" : ""}` : ""}`;
     })
@@ -2761,8 +2993,8 @@ type FocusedTradeForCoach = {
 };
 
 function buildFocusedTradeBlob(t: FocusedTradeForCoach): string {
-  const entryDate = new Date(t.entryTime).toLocaleString();
-  const exitDate = new Date(t.exitTime).toLocaleString();
+  const entryDate = formatEtDateTime(t.entryTime);
+  const exitDate = formatEtDateTime(t.exitTime);
   const notes = (t.notes?.trim() ?? "") || "—";
   const modelTag = (t as { modelTag?: string | null }).modelTag ?? "—";
   return `Instrument: ${t.instrument} | Entry: ${entryDate} | Exit: ${exitDate} | PnL: ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)} | Tags: ${(t.tags ?? []).join(", ") || "—"} | Model: ${modelTag} | Strength (1-5): ${t.strength ?? "—"} | Notes: ${notes}`;
@@ -2800,7 +3032,7 @@ const AICoachPanel = ({
     const tradesBlob = buildTradesContext(trades);
     const bestWorst =
       metrics.bestTrade && metrics.worstTrade
-        ? ` Best trade: ${metrics.bestTrade.instrument} ${new Date(metrics.bestTrade.entryTime).toLocaleDateString()} PnL ${metrics.bestTrade.pnl.toFixed(2)}. Worst: ${metrics.worstTrade.instrument} ${new Date(metrics.worstTrade.entryTime).toLocaleDateString()} PnL ${metrics.worstTrade.pnl.toFixed(2)}.`
+        ? ` Best trade: ${metrics.bestTrade.instrument} ${formatEtShortDate(metrics.bestTrade.entryTime)} PnL ${metrics.bestTrade.pnl.toFixed(2)}. Worst: ${metrics.worstTrade.instrument} ${formatEtShortDate(metrics.worstTrade.entryTime)} PnL ${metrics.worstTrade.pnl.toFixed(2)}.`
         : "";
 
     const focusedBlock = focusedTrade
@@ -2865,7 +3097,7 @@ When the question is about a specific trade or pattern, cite concrete examples f
       {focusedTrade && onClearFocusedTrade && (
         <div className="flex items-center justify-between gap-2 mb-3 py-2 px-3 rounded-xl bg-[#98935c]/10 border border-[#98935c]/40">
           <span className="text-xs font-medium text-[#2e2e2e] dark:text-[#fafafa] truncate">
-            Focusing on: {focusedTrade.instrument} · {new Date(focusedTrade.entryTime).toLocaleDateString()} · {focusedTrade.pnl >= 0 ? "+" : ""}{focusedTrade.pnl.toFixed(2)}
+            Focusing on: {focusedTrade.instrument} · {formatEtShortDate(focusedTrade.entryTime)} · {focusedTrade.pnl >= 0 ? "+" : ""}{focusedTrade.pnl.toFixed(2)}
           </span>
           <button
             type="button"
@@ -3114,7 +3346,7 @@ const DisciplineTabContent = memo(function DisciplineTabContent({
                           </span>
                         </div>
                         <div className="text-xs font-medium text-gray-500 dark:text-[#a1a1aa]">
-                          {new Date(t.entryTime).toLocaleTimeString()} — {new Date(t.exitTime).toLocaleTimeString()}
+                          {formatEtTime(t.entryTime)} — {formatEtTime(t.exitTime)}
                         </div>
                         <button
                           type="button"
@@ -3307,6 +3539,8 @@ const TradeDetailsModal = ({
   modelTags,
   onClose,
   onSave,
+  onDelete,
+  onUncombine,
 }: {
   trade: Trade;
   allTags: string[];
@@ -3314,7 +3548,10 @@ const TradeDetailsModal = ({
   modelTags: string[];
   onClose: () => void;
   onSave: (t: Trade) => void;
+  onDelete?: (tradeId: string) => void;
+  onUncombine?: (tradeId: string) => void;
 }) => {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const isMobile = useIsMobile();
   const [notes, setNotes] = useState(trade.notes);
   const [tags, setTags] = useState<string[]>(trade.tags);
@@ -3488,7 +3725,14 @@ const TradeDetailsModal = ({
                 </span>
               </div>
               <div>
-                {new Date(trade.entryTime).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", hour12: true })} – {new Date(trade.exitTime).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", hour12: true })}
+                {formatEtDateTime(trade.entryTime)} – {formatEtDateTime(trade.exitTime)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-[#a1a1aa]">
+                Time in trade: {formatDurationHMS(
+                  typeof trade.timeInTradeMs === "number"
+                    ? trade.timeInTradeMs
+                    : Math.max(0, trade.exitTime - trade.entryTime)
+                )}
               </div>
             </div>
           </div>
@@ -3781,19 +4025,64 @@ const TradeDetailsModal = ({
           </span>
           <StrengthMeter value={strength} onChange={setStrength} />
         </div>
-        <div className="flex justify-end gap-4 mt-2 w-full">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-white/40"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => onSave({ ...trade, notes, chartImages, tags, strength, modelTag: modelTag ?? undefined })}
-            className="px-6 py-2 bg-[#2e2e2e] text-white rounded-xl text-sm font-semibold tracking-wide hover:bg-black"
-          >
-            Save
-          </button>
+        <div className="flex justify-between items-center gap-4 mt-2 w-full">
+          <div className="flex items-center gap-2">
+            {onDelete && !confirmDelete && (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[#f43636] hover:bg-[#f43636]/10 border border-transparent hover:border-[#f43636]/30"
+                aria-label="Delete trade"
+              >
+                <LucideTrash2 className="w-4 h-4" />
+                Delete
+              </button>
+            )}
+            {onDelete && confirmDelete && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-600 dark:text-[#a1a1aa]">Delete this trade? This cannot be undone.</span>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 hover:bg-white/40"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(trade.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#f43636] text-white hover:bg-[#d62929]"
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+            {onUncombine && trade.mergedSources && trade.mergedSources.length > 0 && !confirmDelete && (
+              <button
+                type="button"
+                onClick={() => onUncombine(trade.id)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-gray-700 dark:text-[#fafafa] hover:bg-white/40 border border-gray-300 dark:border-[#3f3f46]"
+                aria-label="Uncombine trade"
+              >
+                <LucideMerge className="w-4 h-4" />
+                Uncombine ({trade.mergedSources.length})
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onClose}
+              className="px-6 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-white/40"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => onSave({ ...trade, notes, chartImages, tags, strength, modelTag: modelTag ?? undefined })}
+              className="px-6 py-2 bg-[#2e2e2e] text-white rounded-xl text-sm font-semibold tracking-wide hover:bg-black"
+            >
+              Save
+            </button>
+          </div>
         </div>
       </GlassCard>
     </div>

@@ -9,6 +9,7 @@ import type {
   TradeField,
 } from "../types";
 import { REQUIRED_FIELDS } from "../types";
+import { parseEt } from "../../time/et";
 
 /** Aliases per Trade field. Lowercase exact-or-substring matched against header text. */
 const ALIASES: Record<TradeField, string[]> = {
@@ -180,8 +181,7 @@ function parseDateLike(raw: unknown): number {
   if (!s) return NaN;
   if (/^\d{10}$/.test(s)) return parseInt(s, 10) * 1000;
   if (/^\d{13}$/.test(s)) return parseInt(s, 10);
-  const t = new Date(s).getTime();
-  return Number.isNaN(t) ? NaN : t;
+  return parseEt(s);
 }
 
 function parseSide(raw: unknown): boolean | undefined {

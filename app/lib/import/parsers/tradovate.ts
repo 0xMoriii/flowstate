@@ -1,4 +1,5 @@
 import type { BrokerParser, ParsedTrade } from "../types";
+import { parseEt } from "../../time/et";
 
 export const tradovateParser: BrokerParser = {
   id: "tradovate",
@@ -41,8 +42,8 @@ export const tradovateParser: BrokerParser = {
       if (Number.isNaN(cleanPnl)) return;
       const pnl = isNegative ? -cleanPnl : cleanPnl;
 
-      const t1 = new Date(String(row[boughtIdx]).replace(/"/g, "")).getTime();
-      const t2 = new Date(String(row[soldIdx]).replace(/"/g, "")).getTime();
+      const t1 = parseEt(String(row[boughtIdx]).replace(/"/g, ""));
+      const t2 = parseEt(String(row[soldIdx]).replace(/"/g, ""));
       if (Number.isNaN(t1) || Number.isNaN(t2)) return;
 
       const buyPrice = parseFloat(String(row[buyPriceIdx]));

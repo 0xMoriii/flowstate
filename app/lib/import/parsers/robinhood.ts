@@ -1,4 +1,5 @@
 import type { BrokerParser, ParsedTrade } from "../types";
+import { parseEt } from "../../time/et";
 
 const OPTIONS_TRANS_CODES = ["BTO", "STO", "STC", "BTC"];
 const FUTURES_BUY_SELL = ["BUY", "SELL"];
@@ -70,7 +71,7 @@ export const robinhoodParser: BrokerParser = {
       const amount = isNegative ? -cleanAmount : cleanAmount;
 
       const dateStr = (row[activityIdx] ?? "").toString().trim();
-      const dateMs = new Date(dateStr).getTime();
+      const dateMs = parseEt(dateStr);
       if (Number.isNaN(dateMs)) return;
 
       events.push({ dateMs, instrument: instrumentRaw, description, transCode, qty, price, amount, rowIndex: i, isFutures });
