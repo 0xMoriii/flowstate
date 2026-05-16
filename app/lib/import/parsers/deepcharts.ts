@@ -1,4 +1,5 @@
 import type { BrokerParser, ParsedTrade } from "../types";
+import { parseEt } from "../../time/et";
 
 export const deepchartsParser: BrokerParser = {
   id: "deepcharts",
@@ -42,8 +43,8 @@ export const deepchartsParser: BrokerParser = {
       if (Number.isNaN(cleanPnl)) return;
       const pnl = isNegative ? -Math.abs(cleanPnl) : cleanPnl;
 
-      const t1 = new Date(String(row[entryDateIdx]).replace(/"/g, "")).getTime();
-      const t2 = new Date(String(row[exitDateIdx]).replace(/"/g, "")).getTime();
+      const t1 = parseEt(String(row[entryDateIdx]).replace(/"/g, ""));
+      const t2 = parseEt(String(row[exitDateIdx]).replace(/"/g, ""));
       if (Number.isNaN(t1) || Number.isNaN(t2)) return;
 
       const entryPrice = parseFloat(String(row[entryPriceIdx]));
