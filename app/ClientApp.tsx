@@ -33,6 +33,10 @@ import {
   LogIn as LucideLogIn,
   LogOut as LucideLogOut,
   Upload as LucideUpload,
+  BookOpen as LucideBookOpen,
+  ChevronDown as LucideChevronDown,
+  ChevronUp as LucideChevronUp,
+  X as LucideX,
   type LucideIcon,
 } from "lucide-react";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
@@ -54,7 +58,7 @@ import type {
 import ImportMappingModal from "./components/ImportMappingModal";
 import { formatEtDayKey, formatEtTime, formatEtDateTime, formatEtShortDate, formatEtWeekdayDate, formatDurationHMS } from "./lib/time/et";
 
-/** Model card icon options (id -> Lucide component). Used in Models tab and trade model tag. */
+/** Strategy card icon options (id -> Lucide component). Used in Strategy tab and trade strategy tag. */
 const MODEL_ICONS: Record<string, LucideIcon> = {
   target: LucideTarget,
   brain: LucideBrain,
@@ -387,7 +391,8 @@ type TradeForMetrics = {
 };
 
 function computeMetricsFromTrades(
-  trades: TradeForMetrics[]
+  trades: TradeForMetrics[],
+  flowDayKeys?: Set<string>,
 ): {
   profitFactor: number;
   winLossRatio: number;
@@ -426,7 +431,8 @@ function computeMetricsFromTrades(
     const notePart = hasNotes ? 40 : 0;
     const tagPart = Math.min(tagCount * 12, 30);
     const imagePart = Math.min(imageCount * 15, 30);
-    return Math.min(100, notePart + tagPart + imagePart);
+    const flowBonus = flowDayKeys && flowDayKeys.has(formatEtDayKey(t.entryTime)) ? 20 : 0;
+    return Math.min(100, notePart + tagPart + imagePart + flowBonus);
   });
   const journalingScore = journalingScores.length
     ? journalingScores.reduce((a, b) => a + b, 0) / journalingScores.length
@@ -478,6 +484,17 @@ function computeMetricsFromTrades(
   };
 }
 
+type CalendarFlowSubmission = {
+  id: string;
+  templateId: string;
+  templateName: string;
+  date: string;
+  answers: Record<string, string | string[]>;
+  submittedAt: number;
+};
+type CalendarFlowQuestion = { id: string; prompt: string; type: "text" | "tags" };
+type CalendarFlowTemplate = { id: string; name: string; questions: CalendarFlowQuestion[] };
+
 function CalendarView({
   trades,
   setTrades,
@@ -488,6 +505,10 @@ function CalendarView({
   selectedDate,
   setSelectedDate,
   isMobile = false,
+  flowSubmissions = [],
+  flowTemplates = [],
+  onOpenFlow,
+  todayKey,
 }: {
   trades: ReturnType<typeof generateMockTrades>;
   setTrades: React.Dispatch<React.SetStateAction<ReturnType<typeof generateMockTrades>>>;
@@ -498,11 +519,20 @@ function CalendarView({
   selectedDate: string | null;
   setSelectedDate: React.Dispatch<React.SetStateAction<string | null>>;
   isMobile?: boolean;
+  flowSubmissions?: CalendarFlowSubmission[];
+  flowTemplates?: CalendarFlowTemplate[];
+  onOpenFlow?: (templateId: string) => void;
+  todayKey?: string;
 }) {
   const hideWeeklyColumn = isMobile;
   const [compactCalendar, setCompactCalendar] = useState(false);
   const [selectedForCombine, setSelectedForCombine] = useState<Set<string>>(new Set());
   const [confirmClearDay, setConfirmClearDay] = useState(false);
+  const [expandedFlowSubmissionId, setExpandedFlowSubmissionId] = useState<string | null>(null);
+
+  const submissionsForSelectedDay = selectedDate
+    ? flowSubmissions.filter((s) => s.date === selectedDate)
+    : [];
   const calendarContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -840,6 +870,98 @@ function CalendarView({
         {selectedDate && (
           <div className="w-full fade-in pb-8">
             <GlassCard>
+              {submissionsForSelectedDay.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {submissionsForSelectedDay.map((sub) => {
+                    const expanded = expandedFlowSubmissionId === sub.id;
+                    const template = flowTemplates.find((t) => t.id === sub.templateId);
+                    return (
+                      <div key={sub.id} className="w-full">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedFlowSubmissionId(expanded ? null : sub.id)
+                          }
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
+                            expanded
+                              ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
+                              : "bg-[#98935c]/10 text-[#2e2e2e] dark:text-[#fafafa] border-[#98935c]/30 hover:bg-[#98935c]/20"
+                          }`}
+                          aria-expanded={expanded}
+                        >
+                          <LucideBookOpen className="w-4 h-4" />
+                          <span>Flow: {sub.templateName}</span>
+                          {expanded ? (
+                            <LucideChevronUp className="w-4 h-4" />
+                          ) : (
+                            <LucideChevronDown className="w-4 h-4" />
+                          )}
+                        </button>
+                        {expanded && (
+                          <div className="mt-2 p-4 rounded-xl bg-white/40 dark:bg-[#27272a] border border-white/60 dark:border-[#3f3f46] space-y-3">
+                            {template ? (
+                              template.questions.map((q) => {
+                                const ans = sub.answers[q.id];
+                                const displayAns =
+                                  Array.isArray(ans)
+                                    ? ans.length
+                                      ? ans.join(", ")
+                                      : "—"
+                                    : (ans ?? "").toString().trim() || "—";
+                                return (
+                                  <div key={q.id}>
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa] mb-1">
+                                      {q.prompt}
+                                    </div>
+                                    <div className="text-sm text-[#2e2e2e] dark:text-[#fafafa] whitespace-pre-wrap">
+                                      {Array.isArray(ans) ? (
+                                        ans.length ? (
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {ans.map((tag) => (
+                                              <span
+                                                key={tag}
+                                                className="px-2 py-0.5 rounded-md bg-[#2e2e2e] text-white text-xs"
+                                              >
+                                                {tag}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400">—</span>
+                                        )
+                                      ) : (
+                                        displayAns
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="text-xs text-gray-500 italic">
+                                Template no longer exists; showing raw answers.
+                                <pre className="mt-2 text-xs whitespace-pre-wrap">
+                                  {JSON.stringify(sub.answers, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                            {todayKey === sub.date && onOpenFlow && (
+                              <div className="pt-2 border-t border-white/60 dark:border-[#3f3f46]">
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenFlow(sub.templateId)}
+                                  className="text-[11px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"
+                                >
+                                  Edit in Flow →
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-white/50 dark:border-[#3f3f46] pb-4">
                 <h3 className="display-font text-3xl text-[#2e2e2e] dark:text-[#fafafa]">
                   {(() => {
@@ -1052,10 +1174,11 @@ function CalendarView({
 
 const NAV_ITEMS = [
   { id: "dashboard", icon: LucideLayoutDashboard, label: "Dashboard" },
+  { id: "flow", icon: LucideBookOpen, label: "Flow" },
   { id: "recap", icon: LucideList, label: "Daily Recap" },
   { id: "calendar", icon: LucideCalendar, label: "Calendar" },
+  { id: "strategy", icon: LucideTarget, label: "Strategy" },
   { id: "discipline", icon: LucideBrain, label: "Discipline" },
-  { id: "strategy", icon: LucideTarget, label: "Models" },
   { id: "import", icon: LucideUpload, label: "Import Data" },
 ] as const;
 
@@ -1122,6 +1245,8 @@ export default function ClientApp() {
           if (data.discipline_notes && typeof data.discipline_notes === "object") setDisciplineNotes(data.discipline_notes);
           if (Array.isArray(data.models)) setModels(data.models);
           if (Array.isArray(data.import_templates)) setImportTemplates(data.import_templates as ImportTemplate[]);
+          if (Array.isArray(data.flow_templates)) setFlowTemplates(data.flow_templates as FlowTemplate[]);
+          if (Array.isArray(data.flow_submissions)) setFlowSubmissions(data.flow_submissions as FlowSubmission[]);
           if (data.theme === "dark" || data.theme === "light") {
             document.documentElement.classList.toggle("dark", data.theme === "dark");
             setIsDark(data.theme === "dark");
@@ -1284,6 +1409,87 @@ export default function ClientApp() {
     () => loadDisciplineNotesFromStorage(),
   );
 
+  // --- FLOW (daily routine & journal) ---
+  type FlowQuestionType = "text" | "tags";
+  type FlowQuestion = {
+    id: string;
+    prompt: string;
+    type: FlowQuestionType;
+  };
+  type FlowTemplate = {
+    id: string;
+    name: string;
+    iconId: string;
+    questions: FlowQuestion[];
+    createdAt: number;
+  };
+  type FlowAnswerMap = Record<string, string | string[]>;
+  type FlowSubmission = {
+    id: string;
+    templateId: string;
+    templateName: string;
+    date: string;
+    answers: FlowAnswerMap;
+    submittedAt: number;
+  };
+  type FlowDraft = {
+    templateId: string;
+    date: string;
+    answers: FlowAnswerMap;
+    updatedAt: number;
+  };
+
+  const FLOW_TEMPLATES_KEY = "flowstate-flow-templates";
+  const FLOW_SUBMISSIONS_KEY = "flowstate-flow-submissions";
+  const FLOW_DRAFTS_KEY = "flowstate-flow-drafts";
+  const FLOW_ACTIVE_FILL_KEY = "flowstate-flow-active-fill";
+
+  function readLocalJson<T>(key: string, fallback: T): T {
+    if (typeof window === "undefined") return fallback;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  function writeLocalJson(key: string, value: unknown) {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // ignore
+    }
+  }
+
+  const [flowTemplates, setFlowTemplates] = useState<FlowTemplate[]>(() =>
+    readLocalJson<FlowTemplate[]>(FLOW_TEMPLATES_KEY, []),
+  );
+  const [flowSubmissions, setFlowSubmissions] = useState<FlowSubmission[]>(() =>
+    readLocalJson<FlowSubmission[]>(FLOW_SUBMISSIONS_KEY, []),
+  );
+  const [flowDrafts, setFlowDrafts] = useState<Record<string, FlowDraft>>(() =>
+    readLocalJson<Record<string, FlowDraft>>(FLOW_DRAFTS_KEY, {}),
+  );
+
+  const [expandedFlowId, setExpandedFlowId] = useState<string | "new" | null>(null);
+  const [editingFlowId, setEditingFlowId] = useState<string | null>(null);
+  const [draftFlowName, setDraftFlowName] = useState("");
+  const [draftFlowIconId, setDraftFlowIconId] = useState("brain");
+  const [draftFlowQuestions, setDraftFlowQuestions] = useState<FlowQuestion[]>([]);
+
+  const [activeFlowFillId, setActiveFlowFillId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return localStorage.getItem(FLOW_ACTIVE_FILL_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const [expandedFlowSubmissionId, setExpandedFlowSubmissionId] = useState<string | null>(null);
+  const [flowTagDraftInput, setFlowTagDraftInput] = useState<Record<string, string>>({});
+
   // Persist trades to localStorage whenever they change
   useEffect(() => {
     saveTradesToStorage(trades);
@@ -1296,6 +1502,43 @@ export default function ClientApp() {
   useEffect(() => {
     saveModelsToStorage(models);
   }, [models]);
+
+  useEffect(() => {
+    writeLocalJson(FLOW_TEMPLATES_KEY, flowTemplates);
+  }, [flowTemplates]);
+
+  useEffect(() => {
+    writeLocalJson(FLOW_SUBMISSIONS_KEY, flowSubmissions);
+  }, [flowSubmissions]);
+
+  useEffect(() => {
+    writeLocalJson(FLOW_DRAFTS_KEY, flowDrafts);
+  }, [flowDrafts]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (activeFlowFillId) localStorage.setItem(FLOW_ACTIVE_FILL_KEY, activeFlowFillId);
+      else localStorage.removeItem(FLOW_ACTIVE_FILL_KEY);
+    } catch {
+      // ignore
+    }
+  }, [activeFlowFillId]);
+
+  // Prune stale drafts (different ET day) on mount.
+  useEffect(() => {
+    const today = formatEtDayKey(Date.now());
+    setFlowDrafts((prev) => {
+      let changed = false;
+      const next: Record<string, FlowDraft> = {};
+      for (const [tid, draft] of Object.entries(prev)) {
+        if (draft.date === today) next[tid] = draft;
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1319,6 +1562,8 @@ export default function ClientApp() {
       models,
       user_has_imported: hasImported,
       import_templates: importTemplates,
+      flow_templates: flowTemplates,
+      flow_submissions: flowSubmissions,
     });
     if (payload === lastSavedRef.current) return;
     if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
@@ -1348,7 +1593,7 @@ export default function ClientApp() {
     return () => {
       if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
     };
-  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported, importTemplates]);
+  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported, importTemplates, flowTemplates, flowSubmissions]);
 
   // Theme-only save: tiny payload, fires only when isDark changes.
   const lastSavedThemeRef = useRef<string>("");
@@ -1450,11 +1695,153 @@ export default function ClientApp() {
 
   const handleRemoveModel = (id: string) => {
     if (typeof window === "undefined") return;
-    if (!window.confirm("Remove this model? Trades tagged with it will keep the model name but the model will no longer appear in the list.")) return;
+    if (!window.confirm("Remove this strategy? Trades tagged with it will keep the strategy name but the strategy will no longer appear in the list.")) return;
     setModels((prev) => prev.filter((m) => m.id !== id));
     if (expandedModelId === id) setExpandedModelId(null);
     setEditingModelId((prev) => (prev === id ? null : prev));
   };
+
+  // --- FLOW handlers ---
+  const resetDraftFlow = () => {
+    setDraftFlowName("");
+    setDraftFlowIconId("brain");
+    setDraftFlowQuestions([]);
+    setEditingFlowId(null);
+  };
+
+  const loadDraftFromFlowTemplate = (template: FlowTemplate) => {
+    setDraftFlowName(template.name);
+    setDraftFlowIconId(template.iconId in MODEL_ICONS ? template.iconId : "brain");
+    setDraftFlowQuestions(template.questions.map((q) => ({ ...q })));
+    setEditingFlowId(template.id);
+  };
+
+  const handleSaveFlowTemplate = () => {
+    const name = draftFlowName.trim();
+    if (!name) return;
+    const questions = draftFlowQuestions
+      .map((q) => ({ ...q, prompt: q.prompt.trim() }))
+      .filter((q) => q.prompt.length > 0);
+    if (questions.length === 0) return;
+
+    const existing = editingFlowId ? flowTemplates.find((t) => t.id === editingFlowId) : null;
+    const template: FlowTemplate = {
+      id: existing?.id ?? `flw_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      iconId: draftFlowIconId,
+      questions,
+      createdAt: existing?.createdAt ?? Date.now(),
+    };
+    if (editingFlowId) {
+      setFlowTemplates((prev) => prev.map((t) => (t.id === editingFlowId ? template : t)));
+    } else {
+      setFlowTemplates((prev) => [template, ...prev]);
+    }
+    resetDraftFlow();
+    setExpandedFlowId(null);
+  };
+
+  const handleRemoveFlowTemplate = (id: string) => {
+    if (typeof window === "undefined") return;
+    if (!window.confirm("Remove this Flow? Submitted entries on past days will keep their content but the template will no longer appear in the list.")) return;
+    setFlowTemplates((prev) => prev.filter((t) => t.id !== id));
+    setFlowDrafts((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (expandedFlowId === id) setExpandedFlowId(null);
+    if (activeFlowFillId === id) setActiveFlowFillId(null);
+    setEditingFlowId((prev) => (prev === id ? null : prev));
+  };
+
+  const getFlowDraftOrInit = (templateId: string): FlowDraft => {
+    const today = formatEtDayKey(Date.now());
+    const existing = flowDrafts[templateId];
+    if (existing && existing.date === today) return existing;
+    // Seed from today's submission if it exists (allows "resubmit" edit)
+    const sub = flowSubmissions.find((s) => s.templateId === templateId && s.date === today);
+    return {
+      templateId,
+      date: today,
+      answers: sub ? { ...sub.answers } : {},
+      updatedAt: Date.now(),
+    };
+  };
+
+  const updateFlowAnswer = (templateId: string, questionId: string, value: string | string[]) => {
+    setFlowDrafts((prev) => {
+      const today = formatEtDayKey(Date.now());
+      let base: FlowDraft;
+      if (prev[templateId] && prev[templateId].date === today) {
+        base = prev[templateId];
+      } else {
+        // Seed from today's submission if one exists so editing one prompt
+        // doesn't wipe unchanged answers when the user resubmits.
+        const todaySub = flowSubmissions.find(
+          (s) => s.templateId === templateId && s.date === today,
+        );
+        base = {
+          templateId,
+          date: today,
+          answers: todaySub ? { ...todaySub.answers } : {},
+          updatedAt: Date.now(),
+        };
+      }
+      return {
+        ...prev,
+        [templateId]: {
+          ...base,
+          answers: { ...base.answers, [questionId]: value },
+          updatedAt: Date.now(),
+        },
+      };
+    });
+  };
+
+  const handleSubmitFlow = (templateId: string) => {
+    const template = flowTemplates.find((t) => t.id === templateId);
+    if (!template) return;
+    const today = formatEtDayKey(Date.now());
+    const draft = flowDrafts[templateId];
+    const priorSub = flowSubmissions.find(
+      (s) => s.templateId === templateId && s.date === today,
+    );
+    // Prefer in-progress draft, then prior submission, then empty.
+    // Prevents wiping unchanged answers if user reopens a submitted Flow
+    // and resubmits without touching every field.
+    const answers: FlowAnswerMap =
+      draft && draft.date === today
+        ? { ...(priorSub?.answers ?? {}), ...draft.answers }
+        : priorSub
+          ? { ...priorSub.answers }
+          : {};
+    const submission: FlowSubmission = {
+      id: `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      templateId,
+      templateName: template.name,
+      date: today,
+      answers,
+      submittedAt: Date.now(),
+    };
+    setFlowSubmissions((prev) => {
+      const filtered = prev.filter((s) => !(s.templateId === templateId && s.date === today));
+      return [submission, ...filtered];
+    });
+    setFlowDrafts((prev) => {
+      if (!(templateId in prev)) return prev;
+      const next = { ...prev };
+      delete next[templateId];
+      return next;
+    });
+    setActiveFlowFillId(null);
+  };
+
+  const flowSubmissionDateSet = useMemo(
+    () => new Set(flowSubmissions.map((s) => s.date)),
+    [flowSubmissions],
+  );
 
 
   const commitParsedTrades = (parsedTrades: ParsedTrade[], brokerTag: string) => {
@@ -1606,11 +1993,11 @@ export default function ClientApp() {
   }, [trades]);
 
   const metrics = useMemo(() => {
-    const result = computeMetricsFromTrades(trades);
+    const result = computeMetricsFromTrades(trades, flowSubmissionDateSet);
     if (!result) return null;
 
-    const currentM = computeMetricsFromTrades(tradeWindows.current30);
-    const priorM = computeMetricsFromTrades(tradeWindows.prior30);
+    const currentM = computeMetricsFromTrades(tradeWindows.current30, flowSubmissionDateSet);
+    const priorM = computeMetricsFromTrades(tradeWindows.prior30, flowSubmissionDateSet);
     const hasPriorData = !!(priorM && priorM.totalTrades > 0 && currentM && currentM.totalTrades > 0);
     const trends = {
       hasPrevData: hasPriorData,
@@ -2304,7 +2691,7 @@ export default function ClientApp() {
         <button
           type="button"
           onClick={() => {
-            if (typeof window !== "undefined" && !window.confirm("Clear all trades and discipline notes? Your saved models will be kept. This cannot be undone." + (user ? " Data will be cleared from your account on all devices." : ""))) return;
+            if (typeof window !== "undefined" && !window.confirm("Clear all trades and discipline notes? Your saved strategies will be kept. This cannot be undone." + (user ? " Data will be cleared from your account on all devices." : ""))) return;
             setTrades([]);
             setSelectedTrade(null);
             setDisciplineNotes({});
@@ -2453,15 +2840,15 @@ export default function ClientApp() {
   const renderStrategy = () => (
     <div className="fade-in space-y-8 max-w-4xl">
       <div>
-        <h2 className="display-font text-5xl mb-2 text-[#2e2e2e] dark:text-[#fafafa]">Models</h2>
+        <h2 className="display-font text-5xl mb-2 text-[#2e2e2e] dark:text-[#fafafa]">Strategy</h2>
         <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-2xl">
-          Build a card-based playbook for each model. Tap a model card to reveal an interactive
-          checklist you can run in real time during execution.
+          Build a card-based playbook for each strategy. Tap a strategy card to reveal an
+          interactive checklist you can run in real time during execution.
         </p>
       </div>
 
       <div className="flex flex-wrap gap-4 pb-2">
-        {/* Add model card */}
+        {/* Add strategy card */}
         <button
           type="button"
           onClick={() => {
@@ -2477,7 +2864,7 @@ export default function ClientApp() {
           <div className="w-8 h-8 rounded-full border border-[#2e2e2e] dark:border-[#a1a1aa] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0 shrink-0">
             +
           </div>
-          <span className="block w-full text-sm font-semibold text-center">Add Model</span>
+          <span className="block w-full text-sm font-semibold text-center">Add Strategy</span>
         </button>
 
         {models.map((model) => {
@@ -2515,7 +2902,7 @@ export default function ClientApp() {
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
-                Model Name
+                Strategy Name
               </label>
               <input
                 type="text"
@@ -2768,7 +3155,7 @@ export default function ClientApp() {
                         setExpandedModelId("new");
                       }}
                       className="p-2 rounded-lg text-gray-500 hover:bg-white/50 hover:text-[#2e2e2e] transition-colors"
-                      title="Edit model"
+                      title="Edit strategy"
                     >
                       <LucidePencil size={16} />
                     </button>
@@ -2776,7 +3163,7 @@ export default function ClientApp() {
                       type="button"
                       onClick={() => handleRemoveModel(model.id)}
                       className="p-2 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-                      title="Remove model"
+                      title="Remove strategy"
                     >
                       <LucideTrash2 size={16} />
                     </button>
@@ -2840,6 +3227,415 @@ export default function ClientApp() {
     </div>
   );
 
+  const renderFlow = () => {
+    const todayKey = formatEtDayKey(Date.now());
+    const todayLabel = new Date().toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+
+    if (activeFlowFillId) {
+      const template = flowTemplates.find((t) => t.id === activeFlowFillId);
+      if (!template) {
+        setActiveFlowFillId(null);
+        return null;
+      }
+      const draft = getFlowDraftOrInit(template.id);
+      const alreadySubmittedToday = flowSubmissions.some(
+        (s) => s.templateId === template.id && s.date === todayKey,
+      );
+      const Icon = MODEL_ICONS[template.iconId] ?? LucideBookOpen;
+
+      const renderQuestionInput = (q: FlowQuestion) => {
+        const value = draft.answers[q.id];
+        if (q.type === "tags") {
+          const tags = Array.isArray(value) ? value : [];
+          const inputVal = flowTagDraftInput[q.id] ?? "";
+          const addTag = (raw: string) => {
+            const tag = raw.trim();
+            if (!tag) return;
+            if (tags.includes(tag)) return;
+            updateFlowAnswer(template.id, q.id, [...tags, tag]);
+          };
+          return (
+            <div className="flex flex-wrap gap-2 items-center bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-2 min-h-[48px]">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[#2e2e2e] text-white text-xs font-medium"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateFlowAnswer(
+                        template.id,
+                        q.id,
+                        tags.filter((t) => t !== tag),
+                      )
+                    }
+                    className="hover:text-red-300"
+                    aria-label={`Remove ${tag}`}
+                  >
+                    <LucideX size={12} />
+                  </button>
+                </span>
+              ))}
+              <input
+                type="text"
+                value={inputVal}
+                onChange={(e) =>
+                  setFlowTagDraftInput((prev) => ({ ...prev, [q.id]: e.target.value }))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    addTag(inputVal);
+                    setFlowTagDraftInput((prev) => ({ ...prev, [q.id]: "" }));
+                  } else if (e.key === "Backspace" && !inputVal && tags.length > 0) {
+                    updateFlowAnswer(template.id, q.id, tags.slice(0, -1));
+                  }
+                }}
+                onBlur={() => {
+                  if (inputVal.trim()) {
+                    addTag(inputVal);
+                    setFlowTagDraftInput((prev) => ({ ...prev, [q.id]: "" }));
+                  }
+                }}
+                className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm text-[#2e2e2e] dark:text-[#fafafa] placeholder:text-gray-400"
+                placeholder={tags.length === 0 ? "Type and press Enter…" : ""}
+              />
+            </div>
+          );
+        }
+        const textVal = typeof value === "string" ? value : "";
+        return (
+          <textarea
+            value={textVal}
+            onChange={(e) => updateFlowAnswer(template.id, q.id, e.target.value)}
+            className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-light leading-relaxed min-h-[100px]"
+            placeholder="Your answer…"
+          />
+        );
+      };
+
+      return (
+        <div className="fade-in space-y-6 max-w-3xl">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full border border-[#2e2e2e] dark:border-[#a1a1aa] flex items-center justify-center">
+                <Icon size={22} />
+              </div>
+              <div>
+                <h2 className="display-font text-4xl text-[#2e2e2e] dark:text-[#fafafa]">
+                  {template.name}
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-[#a1a1aa] uppercase tracking-widest mt-1">
+                  {todayLabel}
+                  {alreadySubmittedToday && (
+                    <span className="ml-2 text-[#42bda8] normal-case tracking-normal">
+                      • already submitted today (resubmit to overwrite)
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveFlowFillId(null)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 dark:text-[#a1a1aa] hover:bg-white/40"
+            >
+              ← Back to Flows
+            </button>
+          </div>
+
+          <GlassCard className="space-y-5">
+            {template.questions.map((q) => (
+              <div key={q.id}>
+                <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
+                  {q.prompt}
+                </label>
+                {renderQuestionInput(q)}
+              </div>
+            ))}
+
+            <div className="flex justify-end gap-3 pt-2 border-t border-white/60 dark:border-[#3f3f46]">
+              <button
+                type="button"
+                onClick={() => setActiveFlowFillId(null)}
+                className="px-5 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-white/40"
+              >
+                Save draft &amp; exit
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSubmitFlow(template.id)}
+                className="px-5 py-2 rounded-xl text-sm font-semibold tracking-wide bg-[#2e2e2e] text-white hover:bg-black"
+              >
+                {alreadySubmittedToday ? "Resubmit" : "Submit"}
+              </button>
+            </div>
+          </GlassCard>
+        </div>
+      );
+    }
+
+    return (
+      <div className="fade-in space-y-8 max-w-4xl">
+        <div>
+          <h2 className="display-font text-5xl mb-2 text-[#2e2e2e] dark:text-[#fafafa]">Flow</h2>
+          <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-2xl">
+            Build daily routines and journals. Each Flow is a reusable set of prompts you fill in
+            for the current trading day. Submitted Flows attach to that day on the Calendar and
+            contribute to your Discipline Index.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-4 pb-2">
+          <button
+            type="button"
+            onClick={() => {
+              resetDraftFlow();
+              setExpandedFlowId("new");
+            }}
+            className={`flex flex-col items-center justify-center w-[180px] h-[220px] min-w-[180px] flex-shrink-0 rounded-2xl border-2 border-dashed transition-colors px-3 text-center ${
+              expandedFlowId === "new"
+                ? "bg-white/80 dark:bg-[#27272a] border-[#98935c] text-[#2e2e2e] dark:text-[#fafafa]"
+                : "border-gray-300 dark:border-[#3f3f46] bg-white/40 dark:bg-[#27272a] text-[#2e2e2e] dark:text-[#fafafa] hover:border-[#98935c] hover:bg-white/70 dark:hover:bg-[#3f3f46]"
+            }`}
+          >
+            <div className="w-8 h-8 rounded-full border border-[#2e2e2e] dark:border-[#a1a1aa] flex items-center justify-center mb-2 text-2xl leading-none flex-shrink-0">
+              +
+            </div>
+            <span className="block w-full text-sm font-semibold text-center">Create Flow</span>
+          </button>
+
+          {flowTemplates.map((template) => {
+            const Icon = MODEL_ICONS[template.iconId] ?? LucideBookOpen;
+            const submittedToday = flowSubmissions.some(
+              (s) => s.templateId === template.id && s.date === todayKey,
+            );
+            const draft = flowDrafts[template.id];
+            const draftActiveToday =
+              !submittedToday &&
+              draft &&
+              draft.date === todayKey &&
+              Object.values(draft.answers).some((v) =>
+                typeof v === "string" ? v.trim().length > 0 : Array.isArray(v) && v.length > 0,
+              );
+            const status: { label: string; cls: string } = submittedToday
+              ? { label: "Submitted ✓", cls: "text-[#42bda8]" }
+              : draftActiveToday
+                ? { label: "Draft in progress", cls: "text-[#98935c]" }
+                : { label: "Not started", cls: "text-gray-400" };
+
+            return (
+              <div
+                key={template.id}
+                className="relative w-[180px] h-[220px] min-w-[180px] flex-shrink-0"
+              >
+                <button
+                  type="button"
+                  onClick={() => setActiveFlowFillId(template.id)}
+                  className="w-full h-full flex flex-col items-center justify-center rounded-2xl border-2 transition-colors px-3 text-center bg-white/60 dark:bg-[#27272a] border-transparent text-[#2e2e2e] dark:text-[#fafafa] hover:border-[#98935c]/50"
+                >
+                  <div className="w-10 h-10 rounded-full border border-[#2e2e2e] dark:border-[#a1a1aa] flex items-center justify-center mb-3 flex-shrink-0">
+                    <Icon size={22} strokeWidth={2} />
+                  </div>
+                  <span className="block w-full min-w-0 text-xs font-semibold uppercase tracking-widest text-center break-words line-clamp-3">
+                    {template.name}
+                  </span>
+                  <span className="block text-[10px] text-gray-500 dark:text-[#a1a1aa] mt-2">
+                    {template.questions.length} question{template.questions.length === 1 ? "" : "s"}
+                  </span>
+                  <span className={`block text-[10px] font-semibold mt-1 ${status.cls}`}>
+                    {status.label}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    loadDraftFromFlowTemplate(template);
+                    setExpandedFlowId("new");
+                  }}
+                  className="absolute top-2 right-9 p-1.5 rounded-lg text-gray-500 hover:bg-white/60 hover:text-[#2e2e2e] transition-colors"
+                  title="Edit template"
+                >
+                  <LucidePencil size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveFlowTemplate(template.id);
+                  }}
+                  className="absolute top-2 right-2 p-1.5 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                  title="Delete template"
+                >
+                  <LucideTrash2 size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {expandedFlowId === "new" && (
+          <GlassCard className="space-y-6">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
+                  Flow Name
+                </label>
+                <input
+                  type="text"
+                  value={draftFlowName}
+                  onChange={(e) => setDraftFlowName(e.target.value)}
+                  className="w-full bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-[#98935c] text-[#2e2e2e] dark:text-[#fafafa] font-medium"
+                  placeholder="e.g., Pre-market routine"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
+                  Icon
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(MODEL_ICONS).map(([id, IconComponent]) => {
+                    const active = draftFlowIconId === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setDraftFlowIconId(id)}
+                        className={`flex items-center justify-center rounded-xl border w-9 h-9 transition-colors ${
+                          active
+                            ? "bg-[#2e2e2e] text-white border-[#2e2e2e]"
+                            : "bg-white/50 dark:bg-[#3f3f46] text-[#2e2e2e] dark:text-[#fafafa] border-white/60 dark:border-[#3f3f46] hover:border-[#98935c]"
+                        }`}
+                        title={id}
+                      >
+                        <IconComponent size={18} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-white/60 dark:border-[#3f3f46] pt-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                  Questions
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftFlowQuestions((prev) => [
+                      ...prev,
+                      {
+                        id: `q_${Date.now()}_${prev.length}`,
+                        prompt: "",
+                        type: "text",
+                      },
+                    ])
+                  }
+                  className="text-[11px] font-semibold uppercase tracking-widest text-[#98935c] hover:text-[#2e2e2e] dark:hover:text-[#fafafa]"
+                >
+                  + Add question
+                </button>
+              </div>
+
+              {draftFlowQuestions.length === 0 && (
+                <p className="text-xs text-gray-400">
+                  Add the prompts a user should answer each day (e.g., &quot;What is my plan for
+                  today?&quot;, &quot;Emotional state&quot;).
+                </p>
+              )}
+
+              <div className="space-y-3">
+                {draftFlowQuestions.map((q, idx) => (
+                  <div
+                    key={q.id}
+                    className="space-y-2 p-3 rounded-xl bg-white/30 dark:bg-[#27272a] border border-white/50 dark:border-[#3f3f46]"
+                  >
+                    <div className="flex gap-2 items-center">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] w-6">
+                        {idx + 1}.
+                      </span>
+                      <input
+                        type="text"
+                        value={q.prompt}
+                        onChange={(e) =>
+                          setDraftFlowQuestions((prev) =>
+                            prev.map((c, i) =>
+                              i === idx ? { ...c, prompt: e.target.value } : c,
+                            ),
+                          )
+                        }
+                        className="flex-1 bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#98935c]"
+                        placeholder="Prompt (e.g., What is your plan today?)"
+                      />
+                      <select
+                        value={q.type}
+                        onChange={(e) =>
+                          setDraftFlowQuestions((prev) =>
+                            prev.map((c, i) =>
+                              i === idx
+                                ? { ...c, type: e.target.value as FlowQuestionType }
+                                : c,
+                            ),
+                          )
+                        }
+                        className="bg-white/50 dark:bg-[#3f3f46] border border-white/60 dark:border-[#3f3f46] rounded-xl px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-[#98935c]"
+                      >
+                        <option value="text">Text</option>
+                        <option value="tags">Tags</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftFlowQuestions((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="text-[11px] text-gray-500 hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  resetDraftFlow();
+                  setExpandedFlowId(null);
+                }}
+                className="px-5 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-white/40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveFlowTemplate}
+                className="px-5 py-2 rounded-xl text-sm font-semibold tracking-wide bg-[#2e2e2e] text-white hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={
+                  !draftFlowName.trim() ||
+                  draftFlowQuestions.filter((q) => q.prompt.trim()).length === 0
+                }
+              >
+                Save Flow
+              </button>
+            </div>
+          </GlassCard>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex min-h-screen min-h-dvh">
       {renderSidebar()}
@@ -2860,6 +3656,13 @@ export default function ClientApp() {
               selectedDate={calendarSelectedDate}
               setSelectedDate={setCalendarSelectedDate}
               isMobile={isMobile}
+              flowSubmissions={flowSubmissions}
+              flowTemplates={flowTemplates}
+              todayKey={formatEtDayKey(Date.now())}
+              onOpenFlow={(templateId) => {
+                setActiveFlowFillId(templateId);
+                setActiveTab("flow");
+              }}
             />
           )}
           {activeTab === "discipline" && (
@@ -2878,6 +3681,7 @@ export default function ClientApp() {
             />
           )}
           {activeTab === "strategy" && renderStrategy()}
+          {activeTab === "flow" && renderFlow()}
         </main>
       </div>
       {selectedTrade && (
@@ -2997,7 +3801,7 @@ function buildFocusedTradeBlob(t: FocusedTradeForCoach): string {
   const exitDate = formatEtDateTime(t.exitTime);
   const notes = (t.notes?.trim() ?? "") || "—";
   const modelTag = (t as { modelTag?: string | null }).modelTag ?? "—";
-  return `Instrument: ${t.instrument} | Entry: ${entryDate} | Exit: ${exitDate} | PnL: ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)} | Tags: ${(t.tags ?? []).join(", ") || "—"} | Model: ${modelTag} | Strength (1-5): ${t.strength ?? "—"} | Notes: ${notes}`;
+  return `Instrument: ${t.instrument} | Entry: ${entryDate} | Exit: ${exitDate} | PnL: ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(2)} | Tags: ${(t.tags ?? []).join(", ") || "—"} | Strategy: ${modelTag} | Strength (1-5): ${t.strength ?? "—"} | Notes: ${notes}`;
 }
 
 const AICoachPanel = ({
@@ -3211,7 +4015,7 @@ const DisciplineTabContent = memo(function DisciplineTabContent({
     <div className="space-y-6">
       <h2 className="display-font text-5xl text-[#2e2e2e] dark:text-[#fafafa]">Discipline</h2>
       <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa] max-w-xl">
-        Filter by tag or model to review trades and work through discipline problems. Use Flow Lab to discuss the filtered set and attach notes.
+        Filter by tag or strategy to review trades and work through discipline problems. Use Flow Lab to discuss the filtered set and attach notes.
       </p>
 
       <div className="space-y-2">
@@ -3251,7 +4055,7 @@ const DisciplineTabContent = memo(function DisciplineTabContent({
         <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-[#a1a1aa]">Models</span>
         <div className="flex flex-wrap gap-3 items-center">
           {sortedModelTags.length === 0 ? (
-            <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No model tags yet. Assign a model in trade details.</span>
+            <span className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">No strategy tags yet. Assign a strategy in trade details.</span>
           ) : (
             sortedModelTags.map(([modelName, count]) => {
               const isSelected = selectedModelTag === modelName;
@@ -3366,7 +4170,7 @@ const DisciplineTabContent = memo(function DisciplineTabContent({
             </>
           ) : (
             <GlassCard className="flex items-center justify-center min-h-[200px]">
-              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">Select a tag or model above to view trades and discipline notes.</p>
+              <p className="text-sm font-light text-gray-500 dark:text-[#a1a1aa]">Select a tag or strategy above to view trades and discipline notes.</p>
             </GlassCard>
           )}
         </div>
@@ -3862,10 +4666,10 @@ const TradeDetailsModal = ({
           <div className="flex flex-col gap-[49px] min-w-0 h-fit pt-[31px]">
             <div className="h-fit">
               <label className="block text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-[#a1a1aa] mb-2">
-                Model
+                Strategy
               </label>
               <p className="text-[11px] text-gray-400 mb-2">
-                Which saved model was this trade executed with? (Separate from tags.)
+                Which saved strategy was this trade executed with? (Separate from tags.)
               </p>
               <div className="flex flex-wrap gap-2">
                 <button

@@ -8,6 +8,8 @@ export type UserDataPayload = {
   theme?: string;
   user_has_imported?: boolean;
   import_templates?: unknown[];
+  flow_templates?: unknown[];
+  flow_submissions?: unknown[];
 };
 
 export async function GET(request: Request) {
@@ -20,7 +22,9 @@ export async function GET(request: Request) {
   }
   const { data, error } = await supabase
     .from("user_data")
-    .select("trades, discipline_notes, models, theme, user_has_imported, import_templates")
+    .select(
+      "trades, discipline_notes, models, theme, user_has_imported, import_templates, flow_templates, flow_submissions",
+    )
     .eq("user_id", user.id)
     .maybeSingle();
   if (error) {
@@ -33,6 +37,8 @@ export async function GET(request: Request) {
     theme: null,
     user_has_imported: false,
     import_templates: [],
+    flow_templates: [],
+    flow_submissions: [],
   };
   const response = NextResponse.json({
     user: { id: user.id, email: user.email ?? undefined },
@@ -66,6 +72,8 @@ export async function POST(request: Request) {
   if (body.theme !== undefined) updates.theme = body.theme;
   if (body.user_has_imported !== undefined) updates.user_has_imported = body.user_has_imported;
   if (body.import_templates !== undefined) updates.import_templates = body.import_templates;
+  if (body.flow_templates !== undefined) updates.flow_templates = body.flow_templates;
+  if (body.flow_submissions !== undefined) updates.flow_submissions = body.flow_submissions;
 
   const { data: existing, error: selectError } = await supabase
     .from("user_data")
@@ -86,6 +94,8 @@ export async function POST(request: Request) {
         theme: body.theme ?? null,
         user_has_imported: body.user_has_imported ?? false,
         import_templates: body.import_templates ?? [],
+        flow_templates: body.flow_templates ?? [],
+        flow_submissions: body.flow_submissions ?? [],
         updated_at: updatedAt,
       })).error;
   if (error) {
