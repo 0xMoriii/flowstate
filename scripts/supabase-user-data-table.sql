@@ -10,12 +10,20 @@ create table if not exists public.user_data (
   theme text,
   user_has_imported boolean default false,
   import_templates jsonb default '[]'::jsonb,
+  flow_templates jsonb default '[]'::jsonb,
+  flow_submissions jsonb default '[]'::jsonb,
   updated_at timestamptz default now()
 );
 
--- Idempotent column add for existing installations.
+-- Idempotent column adds for existing installations.
 alter table public.user_data
   add column if not exists import_templates jsonb default '[]'::jsonb;
+
+alter table public.user_data
+  add column if not exists flow_templates jsonb default '[]'::jsonb;
+
+alter table public.user_data
+  add column if not exists flow_submissions jsonb default '[]'::jsonb;
 
 -- RLS: users can only read/write their own row.
 alter table public.user_data enable row level security;

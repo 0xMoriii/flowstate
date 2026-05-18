@@ -1245,6 +1245,8 @@ export default function ClientApp() {
           if (data.discipline_notes && typeof data.discipline_notes === "object") setDisciplineNotes(data.discipline_notes);
           if (Array.isArray(data.models)) setModels(data.models);
           if (Array.isArray(data.import_templates)) setImportTemplates(data.import_templates as ImportTemplate[]);
+          if (Array.isArray(data.flow_templates)) setFlowTemplates(data.flow_templates as FlowTemplate[]);
+          if (Array.isArray(data.flow_submissions)) setFlowSubmissions(data.flow_submissions as FlowSubmission[]);
           if (data.theme === "dark" || data.theme === "light") {
             document.documentElement.classList.toggle("dark", data.theme === "dark");
             setIsDark(data.theme === "dark");
@@ -1560,6 +1562,8 @@ export default function ClientApp() {
       models,
       user_has_imported: hasImported,
       import_templates: importTemplates,
+      flow_templates: flowTemplates,
+      flow_submissions: flowSubmissions,
     });
     if (payload === lastSavedRef.current) return;
     if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
@@ -1589,7 +1593,7 @@ export default function ClientApp() {
     return () => {
       if (saveToApiRef.current) clearTimeout(saveToApiRef.current);
     };
-  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported, importTemplates]);
+  }, [user?.id, userDataFetched, trades, disciplineNotes, models, hasImported, importTemplates, flowTemplates, flowSubmissions]);
 
   // Theme-only save: tiny payload, fires only when isDark changes.
   const lastSavedThemeRef = useRef<string>("");
@@ -1769,9 +1773,22 @@ export default function ClientApp() {
   const updateFlowAnswer = (templateId: string, questionId: string, value: string | string[]) => {
     setFlowDrafts((prev) => {
       const today = formatEtDayKey(Date.now());
-      const base = prev[templateId] && prev[templateId].date === today
-        ? prev[templateId]
-        : { templateId, date: today, answers: {}, updatedAt: Date.now() };
+      let base: FlowDraft;
+      if (prev[templateId] && prev[templateId].date === today) {
+        base = prev[templateId];
+      } else {
+        // Seed from today's submission if one exists so editing one prompt
+        // doesn't wipe unchanged answers when the user resubmits.
+        const todaySub = flowSubmissions.find(
+          (s) => s.templateId === templateId && s.date === today,
+        );
+        base = {
+          templateId,
+          date: today,
+          answers: todaySub ? { ...todaySub.answers } : {},
+          updatedAt: Date.now(),
+        };
+      }
       return {
         ...prev,
         [templateId]: {
@@ -1788,7 +1805,18 @@ export default function ClientApp() {
     if (!template) return;
     const today = formatEtDayKey(Date.now());
     const draft = flowDrafts[templateId];
-    const answers: FlowAnswerMap = draft && draft.date === today ? draft.answers : {};
+    const priorSub = flowSubmissions.find(
+      (s) => s.templateId === templateId && s.date === today,
+    );
+    // Prefer in-progress draft, then prior submission, then empty.
+    // Prevents wiping unchanged answers if user reopens a submitted Flow
+    // and resubmits without touching every field.
+    const answers: FlowAnswerMap =
+      draft && draft.date === today
+        ? { ...(priorSub?.answers ?? {}), ...draft.answers }
+        : priorSub
+          ? { ...priorSub.answers }
+          : {};
     const submission: FlowSubmission = {
       id: `sub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       templateId,
